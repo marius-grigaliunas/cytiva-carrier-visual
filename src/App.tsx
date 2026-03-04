@@ -6,6 +6,7 @@ import {
   linesByStep,
   type ReportRow,
 } from './utils/loadReport';
+import { countParcelsForDelivery, countPalletsForDelivery, formatDurationMs, maxDispatchToPickingMsForDelivery } from './utils/tableHeaderFormulas';
 import { getCarrierOrder, getCarrierFromShipMethod } from './utils/carriers.ts';
 import * as XLSX from 'xlsx';
 
@@ -21,10 +22,17 @@ function App() {
   const [shipMethodKey, setShipMethodKey] = useState('');
   const [deliveryIdKey, setDeliveryIdKey] = useState('');
   const [stepKey, setStepKey] = useState('');
+  const [containerTypeKey, setContainerTypeKey] = useState('');
+  const [outermostLpnKey, setOutermostLpnKey] = useState('');
+  const [dispatchedTimestampKey, setDispatchedTimestampKey] = useState('');
+  const [dropOffTimestampKey, setDropOffTimestampKey] = useState('');
   const [filterByCarriers, setFilterByCarriers] = useState<string[]>([]);
   const [filterBySteps, setFilterBySteps] = useState<string[]>([]);
   const [pendingCarriers, setPendingCarriers] = useState<Set<string>>(new Set());
   const [pendingSteps, setPendingSteps] = useState<Set<string>>(new Set());
+  const [tableFilter, setTableFilter] = useState('');
+  const [tableSort, setTableSort] = useState<{ key: 'delivery' | 'parcels'; dir: 'asc' | 'desc' } | null>(null);
+  const [tableFilterParcels, setTableFilterParcels] = useState('');
 
   const rowsForCarrierChart = filterBySteps.length > 0 && stepKey
     ? rows.filter((r) => {
@@ -122,6 +130,15 @@ function App() {
     });
   }, []);
 
+  const handleTableSort = useCallback((key: 'delivery' | 'parcels') => {
+    setTableSort((prev) => {
+      if (prev?.key === key) {
+        return { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' };
+      }
+      return { key, dir: 'asc' };
+    });
+  }, []);
+
   const carrierBarsToShow =
     filterByCarriers.length > 0 && !inCarrierSelectionMode
       ? byCarrier.filter((c) => filterByCarriers.includes(c.carrier))
@@ -145,18 +162,26 @@ function App() {
     setPendingCarriers(new Set());
     setPendingSteps(new Set());
     try {
-      const { rows: data, shipMethodKey: key, deliveryIdKey: didKey, stepKey: sk } =
+      const { rows: data, shipMethodKey: key, deliveryIdKey: didKey, stepKey: sk, containerTypeKey: ctk, outermostLpnKey: olk, dispatchedTimestampKey: dtsKey, dropOffTimestampKey: dotsKey } =
         await loadReportFromUrl(DEFAULT_REPORT_URL);
       setRows(data);
       setShipMethodKey(key);
       setDeliveryIdKey(didKey);
       setStepKey(sk);
+      setContainerTypeKey(ctk ?? '');
+      setOutermostLpnKey(olk ?? '');
+      setDispatchedTimestampKey(dtsKey ?? '');
+      setDropOffTimestampKey(dotsKey ?? '');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load report');
       setRows([]);
       setShipMethodKey('');
       setDeliveryIdKey('');
       setStepKey('');
+      setContainerTypeKey('');
+      setOutermostLpnKey('');
+      setDispatchedTimestampKey('');
+      setDropOffTimestampKey('');
     } finally {
       setLoading(false);
     }
@@ -189,9 +214,10 @@ function App() {
           const deliveryIdKey =
             (() => {
               const lower = (s: string) => String(s).toLowerCase().trim();
-              const deliveryFirst = headers.findIndex((header) =>
-                /delivery/.test(lower(header))
-              );
+              const deliveryFirst = headers.findIndex((header) => {
+                const h = lower(header);
+                return /delivery/.test(h) && !/detail/.test(h);
+              });
               if (deliveryFirst >= 0) return headers[deliveryFirst] ?? '';
               const fallback = headers.find((h) =>
                 /delivery\s*id|shipment\s*id|order\s*id|tracking\s*(number|id)/i.test(h)
@@ -202,16 +228,36 @@ function App() {
             headers.find((h) =>
               /next\s*outbound\s*step|outbound\s*step|^step$/i.test(h)
             ) ?? '';
+          const containerTypeKey =
+            headers.find((h) =>
+              /container\s*type|containertype|container_type|^container$/i.test(h)
+            ) ?? '';
+          const outermostLpnKey =
+            headers.find((h) =>
+              /outermost\s*lpn|outermostlpn|outermost_lpn|^lpn$/i.test(h)
+            ) ?? '';
+          const dispatchedTimestampKey =
+            headers.find((h) => /dispatched\s*timestamp/i.test(String(h).toLowerCase().trim())) ?? '';
+          const dropOffTimestampKey =
+            headers.find((h) => /drop\s*off\s*timestamp/i.test(String(h).toLowerCase().trim())) ?? '';
           setRows(data);
           setShipMethodKey(shipMethodKey);
           setDeliveryIdKey(deliveryIdKey);
           setStepKey(stepKey);
+          setContainerTypeKey(containerTypeKey);
+          setOutermostLpnKey(outermostLpnKey);
+          setDispatchedTimestampKey(dispatchedTimestampKey);
+          setDropOffTimestampKey(dropOffTimestampKey);
         } catch (err) {
           setError(err instanceof Error ? err.message : 'Failed to parse file');
           setRows([]);
           setShipMethodKey('');
           setDeliveryIdKey('');
           setStepKey('');
+          setContainerTypeKey('');
+          setOutermostLpnKey('');
+          setDispatchedTimestampKey('');
+          setDropOffTimestampKey('');
         } finally {
           setLoading(false);
         }
@@ -512,16 +558,47 @@ function App() {
                   Showing deliveries for carriers: {filterByCarriers.join(', ')}
                 </span>
               )}
+              {(tableFilter.trim() || tableFilterParcels.trim()) && (
+                <button
+                  type="button"
+                  onClick={() => { setTableFilter(''); setTableFilterParcels(''); }}
+                  className="block mt-1 text-slate-500 underline hover:text-slate-700"
+                >
+                  Clear all table filters
+                </button>
+              )}
             </p>
-            <div className="overflow-auto max-h-[400px] border-t border-slate-200">
+            <div className="overflow-auto h-[400px] border-t border-slate-200">
               <table className="w-full border-collapse text-sm">
                 <thead className="sticky top-0 z-10 bg-slate-50 shadow-[0_1px_0_0_rgba(0,0,0,0.05)]">
                   <tr className="border-b border-slate-200">
                     <th className="text-left font-semibold text-slate-700 px-4 py-3 whitespace-nowrap">
-                      Delivery
+                      <button
+                        type="button"
+                        onClick={() => handleTableSort('delivery')}
+                        className={`inline-flex items-center gap-1 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded ${tableSort?.key === 'delivery' ? 'text-blue-600' : ''}`}
+                      >
+                        Delivery
+                        {tableSort?.key === 'delivery' && (
+                          <span className="text-blue-600" aria-hidden>
+                            {tableSort?.dir === 'asc' ? '↑' : '↓'}
+                          </span>
+                        )}
+                      </button>
                     </th>
                     <th className="text-right font-semibold text-slate-700 px-4 py-3 whitespace-nowrap">
-                      Number of parcels
+                      <button
+                        type="button"
+                        onClick={() => handleTableSort('parcels')}
+                        className={`inline-flex items-center gap-1 justify-end w-full hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded ${tableSort?.key === 'parcels' ? 'text-blue-600' : ''}`}
+                      >
+                        Number of parcels
+                        {tableSort?.key === 'parcels' && (
+                          <span className="text-blue-600" aria-hidden>
+                            {tableSort?.dir === 'asc' ? '↑' : '↓'}
+                          </span>
+                        )}
+                      </button>
                     </th>
                     <th className="text-right font-semibold text-slate-700 px-4 py-3 whitespace-nowrap">
                       Number of pallets
@@ -536,16 +613,113 @@ function App() {
                       Packing to firm contents
                     </th>
                   </tr>
+                  <tr className="border-b border-slate-200 bg-slate-50/70">
+                    <th className="px-4 py-2 text-left">
+                      <input
+                        type="text"
+                        value={tableFilter}
+                        onChange={(e) => setTableFilter(e.target.value)}
+                        placeholder="Filter…"
+                        className="w-full min-w-[100px] px-2 py-1.5 text-sm border border-slate-300 rounded bg-white text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        aria-label="Filter by Delivery"
+                      />
+                    </th>
+                    <th className="px-4 py-2 text-right">
+                      <input
+                        type="text"
+                        value={tableFilterParcels}
+                        onChange={(e) => setTableFilterParcels(e.target.value)}
+                        placeholder="e.g. 5, &gt;5, &lt;10"
+                        className="w-full min-w-[80px] px-2 py-1.5 text-sm border border-slate-300 rounded bg-white text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-right"
+                        aria-label="Filter by Number of parcels"
+                      />
+                    </th>
+                    <th className="px-4 py-2" />
+                    <th className="px-4 py-2" />
+                    <th className="px-4 py-2" />
+                    <th className="px-4 py-2" />
+                  </tr>
                 </thead>
                 <tbody>
                   {(() => {
+                    const filterLower = tableFilter.trim().toLowerCase();
                     const deliveryIds = [...new Set(
                       rowsForTable
                         .map((r) => r[deliveryIdKey])
                         .filter((id): id is string => id != null && String(id).trim() !== '')
                         .map((id) => String(id).trim())
-                    )].sort();
-                    return deliveryIds.map((deliveryId) => (
+                    )];
+                    let rowsWithParcels: { deliveryId: string; parcels: number; pallets: number; dispatchToPickingMs: number | null }[] = deliveryIds.map((deliveryId) => ({
+                      deliveryId,
+                      parcels: containerTypeKey && outermostLpnKey
+                        ? countParcelsForDelivery(
+                            rowsForTable,
+                            deliveryIdKey,
+                            deliveryId,
+                            containerTypeKey,
+                            outermostLpnKey
+                          )
+                        : 0,
+                      pallets: containerTypeKey && outermostLpnKey
+                        ? countPalletsForDelivery(
+                            rowsForTable,
+                            deliveryIdKey,
+                            deliveryId,
+                            containerTypeKey,
+                            outermostLpnKey
+                          )
+                        : 0,
+                      dispatchToPickingMs: dispatchedTimestampKey
+                        ? maxDispatchToPickingMsForDelivery(
+                            rowsForTable,
+                            deliveryIdKey,
+                            deliveryId,
+                            dispatchedTimestampKey,
+                            dropOffTimestampKey
+                          )
+                        : null,
+                    }));
+                    if (filterLower) {
+                      rowsWithParcels = rowsWithParcels.filter((r) =>
+                        r.deliveryId.toLowerCase().includes(filterLower)
+                      );
+                    }
+                    const parcelsFilter = tableFilterParcels.trim();
+                    if (parcelsFilter) {
+                      const match = parcelsFilter.match(/^(>=?|<=?|>|<)?\s*(\d+)$/);
+                      if (match) {
+                        const op = (match[1] ?? '').trim();
+                        const num = Number(match[2]);
+                        rowsWithParcels = rowsWithParcels.filter((r) => {
+                          if (op === '>') return r.parcels > num;
+                          if (op === '>=') return r.parcels >= num;
+                          if (op === '<') return r.parcels < num;
+                          if (op === '<=') return r.parcels <= num;
+                          return r.parcels === num;
+                        });
+                      } else {
+                        const exact = Number(parcelsFilter);
+                        if (!Number.isNaN(exact)) {
+                          rowsWithParcels = rowsWithParcels.filter((r) => r.parcels === exact);
+                        }
+                      }
+                    }
+                    if (tableSort?.key === 'delivery') {
+                      rowsWithParcels = [...rowsWithParcels].sort((a, b) => {
+                        const cmp = a.deliveryId.localeCompare(b.deliveryId, undefined, { numeric: true });
+                        return tableSort.dir === 'asc' ? cmp : -cmp;
+                      });
+                    } else if (tableSort?.key === 'parcels') {
+                      rowsWithParcels = [...rowsWithParcels].sort((a, b) => {
+                        const cmp = a.parcels - b.parcels;
+                        return tableSort.dir === 'asc' ? cmp : -cmp;
+                      });
+                    } else {
+                      rowsWithParcels = [...rowsWithParcels].sort((a, b) =>
+                        a.deliveryId.localeCompare(b.deliveryId, undefined, { numeric: true })
+                      );
+                    }
+                    return rowsWithParcels.map(({ deliveryId, parcels, pallets, dispatchToPickingMs }) => (
                       <tr
                         key={deliveryId}
                         className="border-b border-slate-100 hover:bg-slate-50/50"
@@ -554,13 +728,19 @@ function App() {
                           {deliveryId}
                         </td>
                         <td className="px-4 py-3 text-right text-slate-600 tabular-nums">
-                          —
+                          {containerTypeKey && outermostLpnKey
+                            ? parcels.toLocaleString()
+                            : '—'}
                         </td>
                         <td className="px-4 py-3 text-right text-slate-600 tabular-nums">
-                          —
+                          {containerTypeKey && outermostLpnKey
+                            ? pallets.toLocaleString()
+                            : '—'}
                         </td>
                         <td className="px-4 py-3 text-right text-slate-600 tabular-nums">
-                          —
+                          {dispatchedTimestampKey
+                            ? (dispatchToPickingMs != null ? formatDurationMs(dispatchToPickingMs) : '—')
+                            : '—'}
                         </td>
                         <td className="px-4 py-3 text-right text-slate-600 tabular-nums">
                           —

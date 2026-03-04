@@ -54,6 +54,34 @@ const STEP_COLUMN_HEADERS = [
   'step',
 ];
 
+const CONTAINER_TYPE_HEADERS = [
+  'container type',
+  'containertype',
+  'container_type',
+  'container',
+];
+
+const OUTERMOST_LPN_HEADERS = [
+  'outermost lpn',
+  'outermostlpn',
+  'outermost_lpn',
+  'lpn',
+];
+
+const DISPATCHED_TIMESTAMP_HEADERS = [
+  'dispatched timestamp (gmt)',
+  'dispatched timestamp',
+  'dispatchedtimestamp',
+  'dispatched_timestamp',
+];
+
+const DROP_OFF_TIMESTAMP_HEADERS = [
+  'drop off timestamp (gmt)',
+  'drop off timestamp',
+  'dropofftimestamp',
+  'drop_off_timestamp',
+];
+
 function findShipMethodColumn(headers: string[]): number {
   const normalized = headers.map((h) => String(h).toLowerCase().trim());
   const idx = normalized.findIndex((h) =>
@@ -66,10 +94,11 @@ function findDeliveryIdColumn(headers: string[]): number {
   const normalized = headers.map((h) => String(h).toLowerCase().trim().replace(/\s+/g, ' '));
   const match = (key: string, h: string) =>
     h.includes(key) || key.replace(/\s+/g, ' ').includes(h);
-  // Prefer "Delivery" column over "Order" when both exist
-  let idx = normalized.findIndex((h) =>
-    DELIVERY_COLUMN_HEADERS.some((key) => match(key, h))
-  );
+  // Prefer "Delivery" column over "Order" or "Delivery Detail ID"
+  let idx = normalized.findIndex((h) => {
+    if (h.includes('detail')) return false; // exclude "Delivery Detail ID"
+    return DELIVERY_COLUMN_HEADERS.some((key) => match(key, h));
+  });
   if (idx >= 0) return idx;
   idx = normalized.findIndex((h) =>
     DELIVERY_ID_HEADERS.some((key) => match(key, h))
@@ -85,13 +114,45 @@ function findStepColumn(headers: string[]): number {
   return idx >= 0 ? idx : -1;
 }
 
+function findContainerTypeColumn(headers: string[]): number {
+  const normalized = headers.map((h) => String(h).toLowerCase().trim().replace(/\s+/g, ' '));
+  const idx = normalized.findIndex((h) =>
+    CONTAINER_TYPE_HEADERS.some((key) => h.includes(key) || key.replace(/\s+/g, ' ').includes(h))
+  );
+  return idx >= 0 ? idx : -1;
+}
+
+function findOutermostLpnColumn(headers: string[]): number {
+  const normalized = headers.map((h) => String(h).toLowerCase().trim().replace(/\s+/g, ' '));
+  const idx = normalized.findIndex((h) =>
+    OUTERMOST_LPN_HEADERS.some((key) => h.includes(key) || key.replace(/\s+/g, ' ').includes(h))
+  );
+  return idx >= 0 ? idx : -1;
+}
+
+function findDispatchedTimestampColumn(headers: string[]): number {
+  const normalized = headers.map((h) => String(h).toLowerCase().trim().replace(/\s+/g, ' '));
+  const idx = normalized.findIndex((h) =>
+    DISPATCHED_TIMESTAMP_HEADERS.some((key) => h.includes(key) || key.replace(/\s+/g, ' ').includes(h))
+  );
+  return idx >= 0 ? idx : -1;
+}
+
+function findDropOffTimestampColumn(headers: string[]): number {
+  const normalized = headers.map((h) => String(h).toLowerCase().trim().replace(/\s+/g, ' '));
+  const idx = normalized.findIndex((h) =>
+    DROP_OFF_TIMESTAMP_HEADERS.some((key) => h.includes(key) || key.replace(/\s+/g, ' ').includes(h))
+  );
+  return idx >= 0 ? idx : -1;
+}
+
 /**
  * Fetches the Excel report from the given URL, parses the first sheet,
  * and returns rows plus the ship method and delivery ID column keys.
  */
 export async function loadReportFromUrl(
   url: string
-): Promise<{ rows: ReportRow[]; shipMethodKey: string; deliveryIdKey: string; stepKey: string }> {
+): Promise<{ rows: ReportRow[]; shipMethodKey: string; deliveryIdKey: string; stepKey: string; containerTypeKey: string; outermostLpnKey: string; dispatchedTimestampKey: string; dropOffTimestampKey: string }> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to load report: ${res.status} ${res.statusText}`);
   const contentType = res.headers.get('content-type') ?? '';
@@ -105,7 +166,7 @@ export async function loadReportFromUrl(
   const firstSheetName = workbook.SheetNames[0];
   const sheet = workbook.Sheets[firstSheetName];
   const data = XLSX.utils.sheet_to_json<ReportRow>(sheet, { defval: undefined });
-  if (data.length === 0) return { rows: [], shipMethodKey: '', deliveryIdKey: '', stepKey: '' };
+  if (data.length === 0) return { rows: [], shipMethodKey: '', deliveryIdKey: '', stepKey: '', containerTypeKey: '', outermostLpnKey: '', dispatchedTimestampKey: '', dropOffTimestampKey: '' };
   const headers = Object.keys(data[0] as object);
   const shipMethodIdx = findShipMethodColumn(headers);
   const shipMethodKey = headers[shipMethodIdx] ?? headers[0] ?? '';
@@ -113,7 +174,15 @@ export async function loadReportFromUrl(
   const deliveryIdKey = deliveryIdIdx >= 0 ? headers[deliveryIdIdx] ?? '' : '';
   const stepIdx = findStepColumn(headers);
   const stepKey = stepIdx >= 0 ? headers[stepIdx] ?? '' : '';
-  return { rows: data, shipMethodKey, deliveryIdKey, stepKey };
+  const containerTypeIdx = findContainerTypeColumn(headers);
+  const containerTypeKey = containerTypeIdx >= 0 ? headers[containerTypeIdx] ?? '' : '';
+  const outermostLpnIdx = findOutermostLpnColumn(headers);
+  const outermostLpnKey = outermostLpnIdx >= 0 ? headers[outermostLpnIdx] ?? '' : '';
+  const dispatchedTsIdx = findDispatchedTimestampColumn(headers);
+  const dispatchedTimestampKey = dispatchedTsIdx >= 0 ? headers[dispatchedTsIdx] ?? '' : '';
+  const dropOffTsIdx = findDropOffTimestampColumn(headers);
+  const dropOffTimestampKey = dropOffTsIdx >= 0 ? headers[dropOffTsIdx] ?? '' : '';
+  return { rows: data, shipMethodKey, deliveryIdKey, stepKey, containerTypeKey, outermostLpnKey, dispatchedTimestampKey, dropOffTimestampKey };
 }
 
 export type DeliveryCountByCarrier = { carrier: string; count: number };
