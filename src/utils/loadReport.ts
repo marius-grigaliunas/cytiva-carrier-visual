@@ -15,9 +15,6 @@ const SHIP_METHOD_HEADERS = [
 ];
 
 const DELIVERY_ID_HEADERS = [
-  'delivery id',
-  'deliveryid',
-  'delivery_id',
   'shipment id',
   'shipmentid',
   'shipment_id',
@@ -27,8 +24,16 @@ const DELIVERY_ID_HEADERS = [
   'tracking number',
   'trackingnumber',
   'tracking_id',
+];
+
+/** Prefer these over DELIVERY_ID_HEADERS when both exist (e.g. "Delivery" vs "Order"). */
+const DELIVERY_COLUMN_HEADERS = [
+  'delivery id',
+  'deliveryid',
+  'delivery_id',
   'delivery number',
   'deliverynumber',
+  'delivery',
 ];
 
 /** Possible values for Next Outbound Step (exact strings from report). */
@@ -59,8 +64,15 @@ function findShipMethodColumn(headers: string[]): number {
 
 function findDeliveryIdColumn(headers: string[]): number {
   const normalized = headers.map((h) => String(h).toLowerCase().trim().replace(/\s+/g, ' '));
-  const idx = normalized.findIndex((h) =>
-    DELIVERY_ID_HEADERS.some((key) => h.includes(key) || key.replace(/\s+/g, ' ').includes(h))
+  const match = (key: string, h: string) =>
+    h.includes(key) || key.replace(/\s+/g, ' ').includes(h);
+  // Prefer "Delivery" column over "Order" when both exist
+  let idx = normalized.findIndex((h) =>
+    DELIVERY_COLUMN_HEADERS.some((key) => match(key, h))
+  );
+  if (idx >= 0) return idx;
+  idx = normalized.findIndex((h) =>
+    DELIVERY_ID_HEADERS.some((key) => match(key, h))
   );
   return idx >= 0 ? idx : -1;
 }
