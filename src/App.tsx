@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   loadReportFromUrl,
   deliveriesByCarrier,
@@ -15,6 +15,42 @@ import cytivaLogo from './assets/Cytiva.svg';
 const base = (import.meta.env.BASE_URL ?? '/').replace(/\/?$/, '/')
 const DEFAULT_REPORT_URL = `${base}data/report.xlsx`
 
+type TableColumnKey = 'delivery' | 'parcels' | 'pallets' | 'dispatchToPicking' | 'pickingToPacking' | 'packingToFirmContents';
+
+interface TableRow {
+  deliveryId: string;
+  parcels: number;
+  pallets: number;
+  dispatchToPickingMs: number | null;
+}
+
+function getCellValue(row: TableRow, key: TableColumnKey, formatDurationMs: (ms: number) => string): string {
+  switch (key) {
+    case 'delivery':
+      return row.deliveryId;
+    case 'parcels':
+      return String(row.parcels);
+    case 'pallets':
+      return String(row.pallets);
+    case 'dispatchToPicking':
+      return row.dispatchToPickingMs != null ? formatDurationMs(row.dispatchToPickingMs) : '—';
+    case 'pickingToPacking':
+    case 'packingToFirmContents':
+      return '—';
+    default:
+      return '';
+  }
+}
+
+const TABLE_COLUMNS: { key: TableColumnKey; label: string; align: 'left' | 'right' }[] = [
+  { key: 'delivery', label: 'Delivery', align: 'left' },
+  { key: 'parcels', label: 'Number of parcels', align: 'right' },
+  { key: 'pallets', label: 'Number of pallets', align: 'right' },
+  { key: 'dispatchToPicking', label: 'Dispatch to picking', align: 'right' },
+  { key: 'pickingToPacking', label: 'Picking to packing', align: 'right' },
+  { key: 'packingToFirmContents', label: 'Packing to firm contents', align: 'right' },
+];
+
 function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,9 +66,21 @@ function App() {
   const [filterBySteps, setFilterBySteps] = useState<string[]>([]);
   const [pendingCarriers, setPendingCarriers] = useState<Set<string>>(new Set());
   const [pendingSteps, setPendingSteps] = useState<Set<string>>(new Set());
-  const [tableFilter, setTableFilter] = useState('');
-  const [tableSort, setTableSort] = useState<{ key: 'delivery' | 'parcels'; dir: 'asc' | 'desc' } | null>(null);
-  const [tableFilterParcels, setTableFilterParcels] = useState('');
+  const [tableColumnFilters, setTableColumnFilters] = useState<Partial<Record<TableColumnKey, Set<string>>>>({});
+  const [tableFilterPopup, setTableFilterPopup] = useState<TableColumnKey | null>(null);
+  const [tableSort, setTableSort] = useState<{ key: TableColumnKey; dir: 'asc' | 'desc' } | null>(null);
+  const filterPopupRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (tableFilterPopup == null) return;
+    const handleMouseDown = (e: MouseEvent) => {
+      if (filterPopupRef.current && !filterPopupRef.current.contains(e.target as Node)) {
+        setTableFilterPopup(null);
+      }
+    };
+    document.addEventListener('mousedown', handleMouseDown);
+    return () => document.removeEventListener('mousedown', handleMouseDown);
+  }, [tableFilterPopup]);
 
   const rowsForCarrierChart = filterBySteps.length > 0 && stepKey
     ? rows.filter((r) => {
@@ -90,6 +138,46 @@ function App() {
     ? uniqueDeliveryCount(rowsForTable, deliveryIdKey)
     : 0;
 
+  const unfilteredTableRows = useMemo((): TableRow[] => {
+    if (!deliveryIdKey) return [];
+    const deliveryIds = [...new Set(
+      rowsForTable
+        .map((r) => r[deliveryIdKey])
+        .filter((id): id is string => id != null && String(id).trim() !== '')
+        .map((id) => String(id).trim())
+    )];
+    return deliveryIds.map((deliveryId): TableRow => ({
+      deliveryId,
+      parcels: containerTypeKey && outermostLpnKey
+        ? countParcelsForDelivery(
+            rowsForTable,
+            deliveryIdKey,
+            deliveryId,
+            containerTypeKey,
+            outermostLpnKey
+          )
+        : 0,
+      pallets: containerTypeKey && outermostLpnKey
+        ? countPalletsForDelivery(
+            rowsForTable,
+            deliveryIdKey,
+            deliveryId,
+            containerTypeKey,
+            outermostLpnKey
+          )
+        : 0,
+      dispatchToPickingMs: dispatchedTimestampKey
+        ? maxDispatchToPickingMsForDelivery(
+            rowsForTable,
+            deliveryIdKey,
+            deliveryId,
+            dispatchedTimestampKey,
+            dropOffTimestampKey
+          )
+        : null,
+    }));
+  }, [rowsForTable, deliveryIdKey, containerTypeKey, outermostLpnKey, dispatchedTimestampKey, dropOffTimestampKey]);
+
   const confirmCarrierSelection = useCallback(() => {
     if (pendingCarriers.size > 0) {
       setFilterByCarriers(Array.from(pendingCarriers));
@@ -130,7 +218,7 @@ function App() {
     });
   }, []);
 
-  const handleTableSort = useCallback((key: 'delivery' | 'parcels') => {
+  const handleTableSort = useCallback((key: TableColumnKey) => {
     setTableSort((prev) => {
       if (prev?.key === key) {
         return { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' };
@@ -558,10 +646,10 @@ function App() {
                   Showing deliveries for carriers: {filterByCarriers.join(', ')}
                 </span>
               )}
-              {(tableFilter.trim() || tableFilterParcels.trim()) && (
+              {(Object.keys(tableColumnFilters).length > 0) && (
                 <button
                   type="button"
-                  onClick={() => { setTableFilter(''); setTableFilterParcels(''); }}
+                  onClick={() => setTableColumnFilters({})}
                   className="block mt-1 text-slate-500 underline hover:text-slate-700"
                 >
                   Clear all table filters
@@ -572,174 +660,185 @@ function App() {
               <table className="w-full border-collapse text-sm">
                 <thead className="sticky top-0 z-10 bg-slate-50 shadow-[0_1px_0_0_rgba(0,0,0,0.05)]">
                   <tr className="border-b border-slate-200">
-                    <th className="text-left font-semibold text-slate-700 px-4 py-3 whitespace-nowrap">
-                      <button
-                        type="button"
-                        onClick={() => handleTableSort('delivery')}
-                        className={`inline-flex items-center gap-1 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded ${tableSort?.key === 'delivery' ? 'text-blue-600' : ''}`}
+                    {TABLE_COLUMNS.map(({ key, label, align }) => (
+                      <th
+                        key={key}
+                        className={`font-semibold text-slate-700 px-4 py-3 whitespace-nowrap ${align === 'right' ? 'text-right' : 'text-left'}`}
                       >
-                        Delivery
-                        {tableSort?.key === 'delivery' && (
-                          <span className="text-blue-600" aria-hidden>
-                            {tableSort?.dir === 'asc' ? '↑' : '↓'}
-                          </span>
-                        )}
-                      </button>
-                    </th>
-                    <th className="text-right font-semibold text-slate-700 px-4 py-3 whitespace-nowrap">
-                      <button
-                        type="button"
-                        onClick={() => handleTableSort('parcels')}
-                        className={`inline-flex items-center gap-1 justify-end w-full hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded ${tableSort?.key === 'parcels' ? 'text-blue-600' : ''}`}
-                      >
-                        Number of parcels
-                        {tableSort?.key === 'parcels' && (
-                          <span className="text-blue-600" aria-hidden>
-                            {tableSort?.dir === 'asc' ? '↑' : '↓'}
-                          </span>
-                        )}
-                      </button>
-                    </th>
-                    <th className="text-right font-semibold text-slate-700 px-4 py-3 whitespace-nowrap">
-                      Number of pallets
-                    </th>
-                    <th className="text-right font-semibold text-slate-700 px-4 py-3 whitespace-nowrap">
-                      Dispatch to picking
-                    </th>
-                    <th className="text-right font-semibold text-slate-700 px-4 py-3 whitespace-nowrap">
-                      Picking to packing
-                    </th>
-                    <th className="text-right font-semibold text-slate-700 px-4 py-3 whitespace-nowrap">
-                      Packing to firm contents
-                    </th>
+                        <button
+                          type="button"
+                          onClick={() => handleTableSort(key)}
+                          className={`inline-flex items-center gap-1 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded ${align === 'right' ? 'justify-end w-full' : ''} ${tableSort?.key === key ? 'text-blue-600' : ''}`}
+                        >
+                          {label}
+                          {tableSort?.key === key && (
+                            <span className="text-blue-600" aria-hidden>
+                              {tableSort?.dir === 'asc' ? '↑' : '↓'}
+                            </span>
+                          )}
+                        </button>
+                      </th>
+                    ))}
                   </tr>
                   <tr className="border-b border-slate-200 bg-slate-50/70">
-                    <th className="px-4 py-2 text-left">
-                      <input
-                        type="text"
-                        value={tableFilter}
-                        onChange={(e) => setTableFilter(e.target.value)}
-                        placeholder="Filter…"
-                        className="w-full min-w-[100px] px-2 py-1.5 text-sm border border-slate-300 rounded bg-white text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        aria-label="Filter by Delivery"
-                      />
-                    </th>
-                    <th className="px-4 py-2 text-right">
-                      <input
-                        type="text"
-                        value={tableFilterParcels}
-                        onChange={(e) => setTableFilterParcels(e.target.value)}
-                        placeholder="e.g. 5, &gt;5, &lt;10"
-                        className="w-full min-w-[80px] px-2 py-1.5 text-sm border border-slate-300 rounded bg-white text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-right"
-                        aria-label="Filter by Number of parcels"
-                      />
-                    </th>
-                    <th className="px-4 py-2" />
-                    <th className="px-4 py-2" />
-                    <th className="px-4 py-2" />
-                    <th className="px-4 py-2" />
+                    {TABLE_COLUMNS.map(({ key, align }) => (
+                      <th key={key} className={`px-4 py-2 ${align === 'right' ? 'text-right' : 'text-left'}`}>
+                        <div ref={tableFilterPopup === key ? filterPopupRef : undefined} className="relative inline-block">
+                          <button
+                            type="button"
+                            onClick={() => setTableFilterPopup((prev) => (prev === key ? null : key))}
+                            className={`inline-flex items-center gap-1 px-2 py-1.5 text-sm border rounded bg-white text-slate-800 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${tableFilterPopup === key ? 'border-blue-500 ring-2 ring-blue-200' : 'border-slate-300'}`}
+                            aria-label={`Filter by ${TABLE_COLUMNS.find((c) => c.key === key)?.label ?? key}`}
+                            aria-expanded={tableFilterPopup === key}
+                          >
+                            Filter
+                            {tableColumnFilters[key] !== undefined && (
+                              <span className="text-blue-600 font-medium" aria-hidden>
+                                ({tableColumnFilters[key]?.size ?? 0})
+                              </span>
+                            )}
+                          </button>
+                          {tableFilterPopup === key && (() => {
+                            const distinct = [...new Set(unfilteredTableRows.map((r) => getCellValue(r, key, formatDurationMs)))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+                            const allowed = tableColumnFilters[key];
+                            const toggleValue = (v: string) => {
+                              setTableColumnFilters((prev) => {
+                                const next = { ...prev };
+                                const current = next[key] ?? new Set(distinct);
+                                const nextSet = new Set(current);
+                                if (nextSet.has(v)) nextSet.delete(v);
+                                else nextSet.add(v);
+                                if (nextSet.size === 0) next[key] = new Set();
+                                else if (nextSet.size === distinct.length) {
+                                  delete next[key];
+                                } else {
+                                  next[key] = nextSet;
+                                }
+                                return next;
+                              });
+                            };
+                            const selectAll = () => {
+                              setTableColumnFilters((prev) => {
+                                const next = { ...prev };
+                                delete next[key];
+                                return next;
+                              });
+                            };
+                            const clearAll = () => {
+                              setTableColumnFilters((prev) => ({ ...prev, [key]: new Set() }));
+                            };
+                            return (
+                              <div
+                                className="absolute left-0 top-full mt-1 z-20 min-w-[200px] max-h-[280px] overflow-auto bg-white border border-slate-200 rounded-lg shadow-lg py-2"
+                                role="dialog"
+                                aria-label={`Filter values for ${TABLE_COLUMNS.find((c) => c.key === key)?.label}`}
+                              >
+                                <div className="flex gap-1 px-2 pb-2 border-b border-slate-100">
+                                  <button
+                                    type="button"
+                                    onClick={selectAll}
+                                    className="flex-1 px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded"
+                                  >
+                                    Select all
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={clearAll}
+                                    className="flex-1 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded"
+                                  >
+                                    Clear all
+                                  </button>
+                                </div>
+                                <div className="py-1 max-h-[220px] overflow-auto">
+                                  {distinct.map((value) => (
+                                    <label
+                                      key={value}
+                                      className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 cursor-pointer text-sm"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={allowed === undefined ? true : allowed.has(value)}
+                                        onChange={() => toggleValue(value)}
+                                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                      />
+                                      <span className="truncate" title={value}>
+                                        {value || '(blank)'}
+                                      </span>
+                                    </label>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
                   {(() => {
-                    const filterLower = tableFilter.trim().toLowerCase();
-                    const deliveryIds = [...new Set(
-                      rowsForTable
-                        .map((r) => r[deliveryIdKey])
-                        .filter((id): id is string => id != null && String(id).trim() !== '')
-                        .map((id) => String(id).trim())
-                    )];
-                    let rowsWithParcels: { deliveryId: string; parcels: number; pallets: number; dispatchToPickingMs: number | null }[] = deliveryIds.map((deliveryId) => ({
-                      deliveryId,
-                      parcels: containerTypeKey && outermostLpnKey
-                        ? countParcelsForDelivery(
-                            rowsForTable,
-                            deliveryIdKey,
-                            deliveryId,
-                            containerTypeKey,
-                            outermostLpnKey
-                          )
-                        : 0,
-                      pallets: containerTypeKey && outermostLpnKey
-                        ? countPalletsForDelivery(
-                            rowsForTable,
-                            deliveryIdKey,
-                            deliveryId,
-                            containerTypeKey,
-                            outermostLpnKey
-                          )
-                        : 0,
-                      dispatchToPickingMs: dispatchedTimestampKey
-                        ? maxDispatchToPickingMsForDelivery(
-                            rowsForTable,
-                            deliveryIdKey,
-                            deliveryId,
-                            dispatchedTimestampKey,
-                            dropOffTimestampKey
-                          )
-                        : null,
-                    }));
-                    if (filterLower) {
-                      rowsWithParcels = rowsWithParcels.filter((r) =>
-                        r.deliveryId.toLowerCase().includes(filterLower)
-                      );
-                    }
-                    const parcelsFilter = tableFilterParcels.trim();
-                    if (parcelsFilter) {
-                      const match = parcelsFilter.match(/^(>=?|<=?|>|<)?\s*(\d+)$/);
-                      if (match) {
-                        const op = (match[1] ?? '').trim();
-                        const num = Number(match[2]);
-                        rowsWithParcels = rowsWithParcels.filter((r) => {
-                          if (op === '>') return r.parcels > num;
-                          if (op === '>=') return r.parcels >= num;
-                          if (op === '<') return r.parcels < num;
-                          if (op === '<=') return r.parcels <= num;
-                          return r.parcels === num;
-                        });
-                      } else {
-                        const exact = Number(parcelsFilter);
-                        if (!Number.isNaN(exact)) {
-                          rowsWithParcels = rowsWithParcels.filter((r) => r.parcels === exact);
+                    let filtered: TableRow[] = unfilteredTableRows.filter((row) => {
+                      for (const { key } of TABLE_COLUMNS) {
+                        const allowed = tableColumnFilters[key];
+                        if (allowed !== undefined) {
+                          if (allowed.size === 0) return false;
+                          const v = getCellValue(row, key, formatDurationMs);
+                          if (!allowed.has(v)) return false;
                         }
                       }
-                    }
-                    if (tableSort?.key === 'delivery') {
-                      rowsWithParcels = [...rowsWithParcels].sort((a, b) => {
-                        const cmp = a.deliveryId.localeCompare(b.deliveryId, undefined, { numeric: true });
-                        return tableSort.dir === 'asc' ? cmp : -cmp;
-                      });
-                    } else if (tableSort?.key === 'parcels') {
-                      rowsWithParcels = [...rowsWithParcels].sort((a, b) => {
-                        const cmp = a.parcels - b.parcels;
-                        return tableSort.dir === 'asc' ? cmp : -cmp;
-                      });
-                    } else {
-                      rowsWithParcels = [...rowsWithParcels].sort((a, b) =>
-                        a.deliveryId.localeCompare(b.deliveryId, undefined, { numeric: true })
-                      );
-                    }
-                    return rowsWithParcels.map(({ deliveryId, parcels, pallets, dispatchToPickingMs }) => (
+                      return true;
+                    });
+                    const sortKey = tableSort?.key ?? 'delivery';
+                    const dir = tableSort?.dir ?? 'asc';
+                    const mult = dir === 'asc' ? 1 : -1;
+                    filtered = [...filtered].sort((a, b) => {
+                      let cmp = 0;
+                      switch (sortKey) {
+                        case 'delivery':
+                          cmp = a.deliveryId.localeCompare(b.deliveryId, undefined, { numeric: true });
+                          break;
+                        case 'parcels':
+                          cmp = a.parcels - b.parcels;
+                          break;
+                        case 'pallets':
+                          cmp = a.pallets - b.pallets;
+                          break;
+                        case 'dispatchToPicking': {
+                          const va = a.dispatchToPickingMs ?? -1;
+                          const vb = b.dispatchToPickingMs ?? -1;
+                          cmp = va - vb;
+                          break;
+                        }
+                        case 'pickingToPacking':
+                        case 'packingToFirmContents':
+                          cmp = 0;
+                          break;
+                        default:
+                          cmp = a.deliveryId.localeCompare(b.deliveryId, undefined, { numeric: true });
+                      }
+                      return cmp * mult;
+                    });
+                    return filtered.map((row) => (
                       <tr
-                        key={deliveryId}
+                        key={row.deliveryId}
                         className="border-b border-slate-100 hover:bg-slate-50/50"
                       >
                         <td className="px-4 py-3 font-medium text-slate-800">
-                          {deliveryId}
+                          {row.deliveryId}
                         </td>
                         <td className="px-4 py-3 text-right text-slate-600 tabular-nums">
                           {containerTypeKey && outermostLpnKey
-                            ? parcels.toLocaleString()
+                            ? row.parcels.toLocaleString()
                             : '—'}
                         </td>
                         <td className="px-4 py-3 text-right text-slate-600 tabular-nums">
                           {containerTypeKey && outermostLpnKey
-                            ? pallets.toLocaleString()
+                            ? row.pallets.toLocaleString()
                             : '—'}
                         </td>
                         <td className="px-4 py-3 text-right text-slate-600 tabular-nums">
                           {dispatchedTimestampKey
-                            ? (dispatchToPickingMs != null ? formatDurationMs(dispatchToPickingMs) : '—')
+                            ? (row.dispatchToPickingMs != null ? formatDurationMs(row.dispatchToPickingMs) : '—')
                             : '—'}
                         </td>
                         <td className="px-4 py-3 text-right text-slate-600 tabular-nums">
