@@ -663,14 +663,14 @@ function App() {
         )}
 
         {rows.length > 0 && deliveryIdKey && (
-          <section className="mt-8 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            <h2 className="text-lg font-semibold text-slate-800 p-6 pb-2">
+          <section className="mt-8 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+            <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 p-6 pb-2">
               Deliveries summary
             </h2>
-            <p className="text-sm text-slate-500 px-6 mb-4">
+            <p className="text-sm text-slate-500 dark:text-slate-400 px-6 mb-4">
               <strong>{deliveriesInTableCount.toLocaleString()}</strong> delivery{deliveriesInTableCount !== 1 ? 's' : ''}. One row per delivery. Metrics will be calculated when formulas are added.
               {filterByCarriers.length > 0 && (
-                <span className="block text-blue-600 mt-0.5">
+                <span className="block text-blue-600 dark:text-blue-400 mt-0.5">
                   Showing deliveries for carriers: {filterByCarriers.join(', ')}
                 </span>
               )}
@@ -678,29 +678,29 @@ function App() {
                 <button
                   type="button"
                   onClick={() => setTableColumnFilters({})}
-                  className="block mt-1 text-slate-500 underline hover:text-slate-700"
+                  className="block mt-1 text-slate-500 dark:text-slate-400 underline hover:text-slate-700 dark:hover:text-slate-200"
                 >
                   Clear all table filters
                 </button>
               )}
             </p>
-            <div className="overflow-auto h-[400px] border-t border-slate-200">
+            <div className="overflow-auto h-[400px] border-t border-slate-200 dark:border-slate-700">
               <table className="w-full border-collapse text-sm">
-                <thead className="sticky top-0 z-10 bg-slate-50 shadow-[0_1px_0_0_rgba(0,0,0,0.05)]">
-                  <tr className="border-b border-slate-200">
+                <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-700/80 shadow-[0_1px_0_0_rgba(0,0,0,0.05)] dark:shadow-[0_1px_0_0_rgba(255,255,255,0.05)]">
+                  <tr className="border-b border-slate-200 dark:border-slate-600">
                     {TABLE_COLUMNS.map(({ key, label, align }) => (
                       <th
                         key={key}
-                        className={`font-semibold text-slate-700 px-4 py-3 whitespace-nowrap ${align === 'right' ? 'text-right' : 'text-left'}`}
+                        className={`font-semibold text-slate-700 dark:text-slate-200 px-4 py-3 whitespace-nowrap ${align === 'right' ? 'text-right' : 'text-left'}`}
                       >
                         <button
                           type="button"
                           onClick={() => handleTableSort(key)}
-                          className={`inline-flex items-center gap-1 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded ${align === 'right' ? 'justify-end w-full' : ''} ${tableSort?.key === key ? 'text-blue-600' : ''}`}
+                          className={`inline-flex items-center gap-1 hover:text-slate-900 dark:hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:focus:ring-offset-slate-800 rounded ${align === 'right' ? 'justify-end w-full' : ''} ${tableSort?.key === key ? 'text-blue-600 dark:text-blue-400' : ''}`}
                         >
                           {label}
                           {tableSort?.key === key && (
-                            <span className="text-blue-600" aria-hidden>
+                            <span className="text-blue-600 dark:text-blue-400" aria-hidden>
                               {tableSort?.dir === 'asc' ? '↑' : '↓'}
                             </span>
                           )}
@@ -708,20 +708,20 @@ function App() {
                       </th>
                     ))}
                   </tr>
-                  <tr className="border-b border-slate-200 bg-slate-50/70">
+                  <tr className="border-b border-slate-200 dark:border-slate-600 bg-slate-50/70 dark:bg-slate-700/50">
                     {TABLE_COLUMNS.map(({ key, align }) => (
                       <th key={key} className={`px-4 py-2 ${align === 'right' ? 'text-right' : 'text-left'}`}>
                         <div ref={tableFilterPopup === key ? filterPopupRef : undefined} className="relative inline-block">
                           <button
                             type="button"
                             onClick={() => setTableFilterPopup((prev) => (prev === key ? null : key))}
-                            className={`inline-flex items-center gap-1 px-2 py-1.5 text-sm border rounded bg-white text-slate-800 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${tableFilterPopup === key ? 'border-blue-500 ring-2 ring-blue-200' : 'border-slate-300'}`}
+                            className={`inline-flex items-center gap-1 px-2 py-1.5 text-sm border rounded bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${tableFilterPopup === key ? 'border-blue-500 ring-2 ring-blue-200 dark:ring-blue-900' : 'border-slate-300 dark:border-slate-600'}`}
                             aria-label={`Filter by ${TABLE_COLUMNS.find((c) => c.key === key)?.label ?? key}`}
                             aria-expanded={tableFilterPopup === key}
                           >
                             Filter
                             {tableColumnFilters[key] !== undefined && (
-                              <span className="text-blue-600 font-medium" aria-hidden>
+                              <span className="text-blue-600 dark:text-blue-400 font-medium" aria-hidden>
                                 ({tableColumnFilters[key]?.size ?? 0})
                               </span>
                             )}
@@ -757,22 +757,22 @@ function App() {
                             };
                             return (
                               <div
-                                className="absolute left-0 top-full mt-1 z-20 min-w-[200px] max-h-[280px] overflow-auto bg-white border border-slate-200 rounded-lg shadow-lg py-2"
+                                className="absolute left-0 top-full mt-1 z-20 min-w-[200px] max-h-[280px] overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-lg shadow-lg py-2"
                                 role="dialog"
                                 aria-label={`Filter values for ${TABLE_COLUMNS.find((c) => c.key === key)?.label}`}
                               >
-                                <div className="flex gap-1 px-2 pb-2 border-b border-slate-100">
+                                <div className="flex gap-1 px-2 pb-2 border-b border-slate-100 dark:border-slate-700">
                                   <button
                                     type="button"
                                     onClick={selectAll}
-                                    className="flex-1 px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded"
+                                    className="flex-1 px-2 py-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/50 rounded"
                                   >
                                     Select all
                                   </button>
                                   <button
                                     type="button"
                                     onClick={clearAll}
-                                    className="flex-1 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded"
+                                    className="flex-1 px-2 py-1 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded"
                                   >
                                     Clear all
                                   </button>
@@ -781,13 +781,13 @@ function App() {
                                   {distinct.map((value) => (
                                     <label
                                       key={value}
-                                      className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 cursor-pointer text-sm"
+                                      className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-sm"
                                     >
                                       <input
                                         type="checkbox"
                                         checked={allowed === undefined ? true : allowed.has(value)}
                                         onChange={() => toggleValue(value)}
-                                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                        className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
                                       />
                                       <span className="truncate" title={value}>
                                         {value || '(blank)'}
@@ -849,30 +849,30 @@ function App() {
                     return filtered.map((row) => (
                       <tr
                         key={row.deliveryId}
-                        className="border-b border-slate-100 hover:bg-slate-50/50"
+                        className="border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50/50 dark:hover:bg-slate-700/50"
                       >
-                        <td className="px-4 py-3 font-medium text-slate-800">
+                        <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">
                           {row.deliveryId}
                         </td>
-                        <td className="px-4 py-3 text-right text-slate-600 tabular-nums">
+                        <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300 tabular-nums">
                           {containerTypeKey && outermostLpnKey
                             ? row.parcels.toLocaleString()
                             : '—'}
                         </td>
-                        <td className="px-4 py-3 text-right text-slate-600 tabular-nums">
+                        <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300 tabular-nums">
                           {containerTypeKey && outermostLpnKey
                             ? row.pallets.toLocaleString()
                             : '—'}
                         </td>
-                        <td className="px-4 py-3 text-right text-slate-600 tabular-nums">
+                        <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300 tabular-nums">
                           {dispatchedTimestampKey
                             ? (row.dispatchToPickingMs != null ? formatDurationMs(row.dispatchToPickingMs) : '—')
                             : '—'}
                         </td>
-                        <td className="px-4 py-3 text-right text-slate-600 tabular-nums">
+                        <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300 tabular-nums">
                           —
                         </td>
-                        <td className="px-4 py-3 text-right text-slate-600 tabular-nums">
+                        <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300 tabular-nums">
                           —
                         </td>
                       </tr>
@@ -884,7 +884,7 @@ function App() {
           </section>
         )}
         {!loading && rows.length === 0 && !error && (
-          <p className="text-slate-500 text-center py-12">
+          <p className="text-slate-500 dark:text-slate-400 text-center py-12">
             Load a report to see deliveries per carrier and lines per step.
           </p>
         )}
