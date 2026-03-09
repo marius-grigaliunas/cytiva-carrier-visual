@@ -55,6 +55,15 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<ReportRow[]>([]);
+  const [darkMode, setDarkMode] = useState(() => {
+    try {
+      const stored = localStorage.getItem('cytiva-carrier-dark');
+      if (stored !== null) return stored === '1';
+      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    } catch {
+      return false;
+    }
+  });
   const [shipMethodKey, setShipMethodKey] = useState('');
   const [deliveryIdKey, setDeliveryIdKey] = useState('');
   const [stepKey, setStepKey] = useState('');
@@ -70,6 +79,12 @@ function App() {
   const [tableFilterPopup, setTableFilterPopup] = useState<TableColumnKey | null>(null);
   const [tableSort, setTableSort] = useState<{ key: TableColumnKey; dir: 'asc' | 'desc' } | null>(null);
   const filterPopupRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('cytiva-carrier-dark', darkMode ? '1' : '0');
+    } catch {}
+  }, [darkMode]);
 
   useEffect(() => {
     if (tableFilterPopup == null) return;
@@ -357,15 +372,28 @@ function App() {
   );
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50">
-      <header className="flex items-center gap-4 px-6 py-4 bg-white border-b border-slate-200 shadow-sm">
+    <div className={`min-h-screen flex flex-col bg-slate-50 dark:bg-slate-900 ${darkMode ? 'dark' : ''}`}>
+      <header className="flex items-center gap-4 px-6 py-4 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 shadow-sm">
         <img src={cytivaLogo} alt="Cytiva logo" className="h-8 w-auto" />
-        <h1 className="text-xl font-semibold text-slate-800 w-full text-left">
+        <h1 className="text-xl font-semibold text-slate-800 dark:text-slate-100 w-full text-left">
           Carrier dashboard
         </h1>
-        <h2 className="text-md font-semibold text-slate-700 w-full text-right">
+        <h2 className="text-md font-semibold text-slate-700 dark:text-slate-300 w-full text-right">
           Created by: <span className="font-bold">Marius Grigaliunas</span>
         </h2>
+        <button
+          type="button"
+          onClick={() => setDarkMode((d) => !d)}
+          aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+          className="p-2 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+          title={darkMode ? 'Light mode' : 'Dark mode'}
+        >
+          {darkMode ? (
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+          ) : (
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
+          )}
+        </button>
       </header>
       <main className="flex-1 p-6 max-w-6xl mx-auto w-full">
         <div className="flex flex-wrap gap-3 items-center mb-6">
@@ -373,11 +401,11 @@ function App() {
             type="button"
             onClick={loadFromUrl}
             disabled={loading}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:pointer-events-none"
+            className="px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded-lg font-medium hover:bg-blue-700 dark:hover:bg-blue-600 disabled:opacity-50 disabled:pointer-events-none"
           >
             {loading ? 'Loading…' : 'Load report from server'}
           </button>
-          <label className="px-4 py-2 bg-slate-200 text-slate-800 rounded-lg font-medium hover:bg-slate-300 cursor-pointer">
+          <label className="px-4 py-2 bg-slate-200 dark:bg-slate-600 text-slate-800 dark:text-slate-100 rounded-lg font-medium hover:bg-slate-300 dark:hover:bg-slate-500 cursor-pointer">
             <input
               type="file"
               accept=".xlsx,.xls"
@@ -388,7 +416,7 @@ function App() {
             Choose Excel file…
           </label>
           {shipMethodKey && (
-            <span className="text-sm text-slate-500">
+            <span className="text-sm text-slate-500 dark:text-slate-400">
               Ship method: <strong>{shipMethodKey}</strong>
               {deliveryIdKey && (
                 <> · Delivery ID: <strong>{deliveryIdKey}</strong></>
@@ -400,31 +428,31 @@ function App() {
           )}
         </div>
 
-        <div className="mb-4 min-h-10 flex items-center gap-2 text-sm rounded-lg bg-slate-100 px-3">
+        <div className="mb-4 min-h-10 flex items-center gap-2 text-sm rounded-lg bg-slate-100 dark:bg-slate-800 px-3">
           {hasFilter ? (
             <>
-              <span className="text-slate-600">Filter:</span>
+              <span className="text-slate-600 dark:text-slate-300">Filter:</span>
               {filterByCarriers.length > 0 && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2.5 py-0.5 text-blue-800">
+                <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 dark:bg-blue-900/50 px-2.5 py-0.5 text-blue-800 dark:text-blue-200">
                   Carriers: {filterByCarriers.join(', ')}
                   <button
                     type="button"
                     aria-label="Clear carrier filter"
                     onClick={() => setFilterByCarriers([])}
-                    className="rounded-full hover:bg-blue-200 p-0.5"
+                    className="rounded-full hover:bg-blue-200 dark:hover:bg-blue-800 p-0.5"
                   >
                     ×
                   </button>
                 </span>
               )}
               {filterBySteps.length > 0 && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-emerald-800">
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 dark:bg-emerald-900/50 px-2.5 py-0.5 text-emerald-800 dark:text-emerald-200">
                   Steps: {filterBySteps.join(', ')}
                   <button
                     type="button"
                     aria-label="Clear step filter"
                     onClick={() => setFilterBySteps([])}
-                    className="rounded-full hover:bg-emerald-200 p-0.5"
+                    className="rounded-full hover:bg-emerald-200 dark:hover:bg-emerald-800 p-0.5"
                   >
                     ×
                   </button>
@@ -433,22 +461,22 @@ function App() {
               <button
                 type="button"
                 onClick={() => { setFilterByCarriers([]); setFilterBySteps([]); }}
-                className="text-slate-500 underline hover:text-slate-700"
+                className="text-slate-500 dark:text-slate-400 underline hover:text-slate-700 dark:hover:text-slate-200"
               >
                 Clear all
               </button>
             </>
           ) : (
-            <span className="text-slate-400 text-sm">No filters applied</span>
+            <span className="text-slate-400 dark:text-slate-500 text-sm">No filters applied</span>
           )}
         </div>
 
         {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-800 text-sm">
+          <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg text-red-800 dark:text-red-200 text-sm">
             {error}
-            <p className="mt-2 text-red-600">
-              Place your report at <code className="bg-red-100 px-1 rounded">public/data/report.xlsx</code> or use
-              “Choose Excel file” to pick it from your <code className="bg-red-100 px-1 rounded">data</code> folder.
+            <p className="mt-2 text-red-600 dark:text-red-300">
+              Place your report at <code className="bg-red-100 dark:bg-red-900/50 px-1 rounded">public/data/report.xlsx</code> or use
+              “Choose Excel file” to pick it from your <code className="bg-red-100 dark:bg-red-900/50 px-1 rounded">data</code> folder.
             </p>
           </div>
         )}
@@ -456,17 +484,17 @@ function App() {
         {rows.length > 0 && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <section
-              className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 relative"
+              className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-6 relative"
               onClick={inCarrierSelectionMode ? confirmCarrierSelection : undefined}
             >
               {inCarrierSelectionMode && (
-                <div className="absolute top-4 right-4 flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 shadow-sm">
-                  <span className="text-xs text-slate-500 mr-1">Confirm or cancel:</span>
+                <div className="absolute top-4 right-4 flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 px-2 py-1 shadow-sm">
+                  <span className="text-xs text-slate-500 dark:text-slate-400 mr-1">Confirm or cancel:</span>
                   <button
                     type="button"
                     aria-label="Cancel selection"
                     onClick={(e) => { e.stopPropagation(); cancelCarrierSelection(); }}
-                    className="rounded p-1.5 text-slate-600 hover:bg-red-100 hover:text-red-700"
+                    className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-red-100 dark:hover:bg-red-900/50 hover:text-red-700 dark:hover:text-red-300"
                     title="Cancel selection"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
@@ -476,30 +504,30 @@ function App() {
                     aria-label="Confirm selection"
                     onClick={(e) => { e.stopPropagation(); confirmCarrierSelection(); }}
                     disabled={pendingCarriers.size === 0}
-                    className="rounded p-1.5 text-slate-600 hover:bg-emerald-100 hover:text-emerald-700 disabled:opacity-50 disabled:pointer-events-none"
+                    className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 hover:text-emerald-700 dark:hover:text-emerald-300 disabled:opacity-50 disabled:pointer-events-none"
                     title="Confirm selection"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
                   </button>
                 </div>
               )}
-              <h2 className="text-lg font-semibold text-slate-800 mb-1">
+              <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-1">
                 Deliveries per carrier
               </h2>
-              <p className="text-sm text-slate-500 mb-4">
+              <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
                 Total deliveries: <strong>{totalDeliveries.toLocaleString()}</strong>
                 {totalLines !== totalDeliveries && (
-                  <span className="text-slate-400 ml-2">
+                  <span className="text-slate-400 dark:text-slate-500 ml-2">
                     ({totalLines.toLocaleString()} lines)
                   </span>
                 )}
                 {filterBySteps.length > 0 && (
-                  <span className="block text-emerald-600 mt-0.5">
+                  <span className="block text-emerald-600 dark:text-emerald-400 mt-0.5">
                     Showing for steps: {filterBySteps.join(', ')}
                   </span>
                 )}
                 {inCarrierSelectionMode && (
-                  <span className="block text-blue-600 mt-0.5">
+                  <span className="block text-blue-600 dark:text-blue-400 mt-0.5">
                     {pendingCarriers.size > 0
                       ? `Selected: ${Array.from(pendingCarriers).join(', ')} — click more carriers or ✓ to filter step chart, X to cancel`
                       : 'Click one or more carriers, then ✓ to filter step chart'}
@@ -517,27 +545,27 @@ function App() {
                     key={carrier}
                     onClick={() => toggleCarrierPending(carrier)}
                     className={`w-full flex items-center gap-4 text-left rounded-lg p-1 -m-1 transition-colors ${
-                      pendingCarriers.has(carrier) ? 'ring-2 ring-blue-500 ring-offset-2 bg-blue-50' : 'hover:bg-slate-50'
+                      pendingCarriers.has(carrier) ? 'ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-slate-800 bg-blue-50 dark:bg-blue-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'
                     }`}
                   >
-                    <div className="w-32 shrink-0 text-sm font-medium text-slate-700">
+                    <div className="w-32 shrink-0 text-sm font-medium text-slate-700 dark:text-slate-300">
                       {carrier}
                     </div>
                     <div className="flex-1 flex items-center gap-3">
-                      <div className="flex-1 h-8 bg-slate-100 rounded overflow-hidden">
+                      <div className="flex-1 h-8 bg-slate-100 dark:bg-slate-700 rounded overflow-hidden">
                         <div
                           className="h-full bg-blue-500 rounded min-w-[2px] transition-all duration-300"
                           style={{ width: `${(count / maxCarrierDisplay) * 100}%` }}
                         />
                       </div>
-                      <span className="w-20 text-right text-sm tabular-nums text-slate-600 font-medium">
+                      <span className="w-20 text-right text-sm tabular-nums text-slate-600 dark:text-slate-300 font-medium">
                         {count.toLocaleString()}
                       </span>
                     </div>
                   </button>
                 ))}
               </div>
-              <p className="text-xs text-slate-400 mt-3">
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-3">
                 {inCarrierSelectionMode
                   ? 'Click carriers to add/remove from selection, ✓ to confirm filter, or X to cancel'
                   : 'Click a carrier to enter selection mode; select one or more, then confirm to filter the step chart'}
@@ -545,17 +573,17 @@ function App() {
             </section>
 
             <section
-              className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 relative"
+              className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-6 relative"
               onClick={inStepSelectionMode ? confirmStepSelection : undefined}
             >
               {inStepSelectionMode && (
-                <div className="absolute top-4 right-4 flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 shadow-sm">
-                  <span className="text-xs text-slate-500 mr-1">Confirm or cancel:</span>
+                <div className="absolute top-4 right-4 flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 px-2 py-1 shadow-sm">
+                  <span className="text-xs text-slate-500 dark:text-slate-400 mr-1">Confirm or cancel:</span>
                   <button
                     type="button"
                     aria-label="Cancel selection"
                     onClick={(e) => { e.stopPropagation(); cancelStepSelection(); }}
-                    className="rounded p-1.5 text-slate-600 hover:bg-red-100 hover:text-red-700"
+                    className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-red-100 dark:hover:bg-red-900/50 hover:text-red-700 dark:hover:text-red-300"
                     title="Cancel selection"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
@@ -565,25 +593,25 @@ function App() {
                     aria-label="Confirm selection"
                     onClick={(e) => { e.stopPropagation(); confirmStepSelection(); }}
                     disabled={pendingSteps.size === 0}
-                    className="rounded p-1.5 text-slate-600 hover:bg-emerald-100 hover:text-emerald-700 disabled:opacity-50 disabled:pointer-events-none"
+                    className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 hover:text-emerald-700 dark:hover:text-emerald-300 disabled:opacity-50 disabled:pointer-events-none"
                     title="Confirm selection"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
                   </button>
                 </div>
               )}
-              <h2 className="text-lg font-semibold text-slate-800 mb-1">
+              <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-1">
                 Lines per step status
               </h2>
-              <p className="text-sm text-slate-500 mb-4">
+              <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
                 Total lines: <strong>{totalLines.toLocaleString()}</strong>
                 {filterByCarriers.length > 0 && (
-                  <span className="block text-blue-600 mt-0.5">
+                  <span className="block text-blue-600 dark:text-blue-400 mt-0.5">
                     Showing for carriers: {filterByCarriers.join(', ')}
                   </span>
                 )}
                 {inStepSelectionMode && (
-                  <span className="block text-emerald-600 mt-0.5">
+                  <span className="block text-emerald-600 dark:text-emerald-400 mt-0.5">
                     {pendingSteps.size > 0
                       ? `Selected: ${Array.from(pendingSteps).join(', ')} — click more steps or ✓ to filter carrier chart, X to cancel`
                       : 'Click one or more steps, then ✓ to filter carrier chart'}
@@ -602,20 +630,20 @@ function App() {
                       key={step}
                       onClick={() => toggleStepPending(step)}
                       className={`w-full flex items-center gap-4 text-left rounded-lg p-1 -m-1 transition-colors ${
-                        pendingSteps.has(step) ? 'ring-2 ring-emerald-500 ring-offset-2 bg-emerald-50' : 'hover:bg-slate-50'
+                        pendingSteps.has(step) ? 'ring-2 ring-emerald-500 ring-offset-2 dark:ring-offset-slate-800 bg-emerald-50 dark:bg-emerald-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'
                       }`}
                     >
-                      <div className="w-36 shrink-0 text-sm font-medium text-slate-700">
+                      <div className="w-36 shrink-0 text-sm font-medium text-slate-700 dark:text-slate-300">
                         {step}
                       </div>
                       <div className="flex-1 flex items-center gap-3">
-                        <div className="flex-1 h-8 bg-slate-100 rounded overflow-hidden">
+                        <div className="flex-1 h-8 bg-slate-100 dark:bg-slate-700 rounded overflow-hidden">
                           <div
                             className="h-full bg-emerald-500 rounded min-w-[2px] transition-all duration-300"
                             style={{ width: `${(count / maxStepDisplay) * 100}%` }}
                           />
                         </div>
-                        <span className="w-20 text-right text-sm tabular-nums text-slate-600 font-medium">
+                        <span className="w-20 text-right text-sm tabular-nums text-slate-600 dark:text-slate-300 font-medium">
                           {count.toLocaleString()}
                         </span>
                       </div>
@@ -623,9 +651,9 @@ function App() {
                   ))}
                 </div>
               ) : (
-                <p className="text-slate-500 text-sm">No “Next Outbound Step” column found in this report.</p>
+                <p className="text-slate-500 dark:text-slate-400 text-sm">No “Next Outbound Step” column found in this report.</p>
               )}
-              <p className="text-xs text-slate-400 mt-3">
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-3">
                 {inStepSelectionMode
                   ? 'Click steps to add/remove from selection, ✓ to confirm filter, or X to cancel'
                   : 'Click a step to enter selection mode; select one or more, then confirm to filter the carrier chart'}
