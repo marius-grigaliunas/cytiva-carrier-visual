@@ -11,7 +11,8 @@ import { getCarrierOrder, getCarrierFromShipMethod } from './utils/carriers.ts';
 import * as XLSX from 'xlsx';
 
 import type { TruckScheduleItem } from './types/schedule';
-import { TruckScheduleStrip } from './components/TruckScheduleStrip';
+import { TruckScheduleStrip, type AddTruckData } from './components/TruckScheduleStrip';
+import { TRUCK_SCHEDULE, getDefaultCutoffsByCarrier } from './utils/truckSchedule';
 import { CarrierGrid } from './components/CarrierGrid';
 import { AlertPanel } from './components/AlertPanel';
 import { DeliveriesPerCarrier } from './components/DeliveriesPerCarrier';
@@ -59,21 +60,25 @@ function App() {
   const previousBurnRateRef = useRef<Record<string, number>>({});
 
   const getInitialTrucks = useCallback((): TruckScheduleItem[] => {
-    const now = Date.now();
-    const base = new Date(now);
-    base.setMinutes(0, 0, 0);
-    return Array.from({ length: 13 }, (_, i) => {
-      const d = new Date(base.getTime() + (i + 1) * (60 * 60 * 1000));
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return TRUCK_SCHEDULE.map((t, i) => {
+      const [h, m] = t.time.trim().split(':').map((s) => parseInt(s, 10) || 0);
+      const d = new Date(today);
+      d.setHours(h, m, 0, 0);
       return {
-        id: `truck-${i + 1}`,
-        label: `Truck ${i + 1}`,
+        id: `truck-${i + 1}-${t.carrier}`,
+        label: t.name,
         departureMs: d.getTime(),
+        carrier: t.carrier,
         cancelled: false,
       };
     });
   }, []);
 
   const [trucks, setTrucks] = useState<TruckScheduleItem[]>(getInitialTrucks);
+  const defaultCutoffs = useMemo(getDefaultCutoffsByCarrier, []);
+  const [cutoffsByCarrier, setCutoffsByCarrier] = useState<Record<string, number>>(() => ({ ...defaultCutoffs }));
   const [tick, setTick] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setTick((k) => k + 1), 60 * 1000);
@@ -325,25 +330,27 @@ function App() {
     });
   }, [carrierStats]);
 
-  const handleAddTruck = useCallback(() => {
-    const maxNum = trucks.reduce((acc, t) => {
-      const m = t.label.match(/Truck (\d+)/);
-      const n = m ? parseInt(m[1], 10) : 0;
-      return Math.max(acc, n);
-    }, 0);
-    const next = maxNum + 1;
-    const d = new Date(cutoffMs ?? Date.now() + 2 * 60 * 60 * 1000);
-    d.setTime(d.getTime() + 60 * 60 * 1000);
+  const handleCutoffChange = useCallback((carrier: string, ms: number) => {
+    setCutoffsByCarrier((prev) => ({ ...prev, [carrier]: ms }));
+  }, []);
+
+  const handleAddTruck = useCallback((truck: AddTruckData) => {
+    const [h, m] = truck.time.trim().split(':').map((s) => parseInt(s, 10) || 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const d = new Date(today);
+    d.setHours(h, m, 0, 0);
     setTrucks((prev) => [
       ...prev,
       {
-        id: `truck-${next}-${Date.now()}`,
-        label: `Truck ${next}`,
+        id: `truck-${Date.now()}-${truck.carrier}`,
+        label: truck.name || 'Truck',
         departureMs: d.getTime(),
+        carrier: truck.carrier,
         cancelled: false,
       },
     ]);
-  }, [trucks, cutoffMs]);
+  }, []);
 
   const loadFromUrl = useCallback(async () => {
     setError(null);
@@ -693,6 +700,43 @@ setPanelVisible({ carrier: true, step: false, table: false, truckSchedule: true,
               </div>
               {sidebarOpen && (
                 <div className="flex flex-col gap-1 p-2 overflow-auto">
+                  {/* Default cutoff times (per carrier) */}
+                  <div className="mb-2 pb-2 border-b border-slate-200 dark:border-slate-600">
+                    <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">
+                      Default cutoff times
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      {getCarrierOrder().map((carrier) => {
+                        const ms = cutoffsByCarrier[carrier] ?? defaultCutoffs[carrier];
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+                        const timeStr = ms != null
+                          ? `${String(new Date(ms).getHours()).padStart(2, '0')}:${String(new Date(ms).getMinutes()).padStart(2, '0')}`
+                          : '';
+                        return (
+                          <div key={carrier} className="flex items-center justify-between gap-1">
+                            <span className="text-xs text-slate-700 dark:text-slate-300 truncate min-w-0">
+                              {carrier}
+                            </span>
+                            <input
+                              type="time"
+                              value={timeStr}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                if (v) {
+                                  const [h = 0, m = 0] = v.split(':').map((s) => parseInt(s, 10) || 0);
+                                  const d = new Date(today);
+                                  d.setHours(h, m, 0, 0);
+                                  handleCutoffChange(carrier, d.getTime());
+                                }
+                              }}
+                              className="text-xs w-16 px-1 py-0.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shrink-0"
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                   {minimizedPanelIds.length > 0 ? (
                     <>
                       <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Not on dashboard</div>
@@ -840,7 +884,12 @@ setPanelVisible({ carrier: true, step: false, table: false, truckSchedule: true,
               )}
               {type === 'carrierGrid' && (
                 <div className="h-full min-h-0 overflow-auto">
-                  <CarrierGrid stats={carrierStats} className="h-full" />
+                  <CarrierGrid
+                    stats={carrierStats}
+                    trucks={trucks}
+                    cutoffsByCarrier={cutoffsByCarrier}
+                    className="h-full"
+                  />
                 </div>
               )}
               {type === 'alertPanel' && (

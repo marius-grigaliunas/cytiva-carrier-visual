@@ -1,8 +1,11 @@
-/** Single truck in the schedule with editable departure and cancellation. */
+/** Single truck in the schedule with editable name, time, carrier, and cancellation. */
 export interface TruckScheduleItem {
   id: string;
+  /** Display name (e.g. "Truck 1") */
   label: string;
   departureMs: number;
+  /** Carrier key (e.g. DHL_FREIGHT, GEODIS) - used for Gantt and cutoffs */
+  carrier: string;
   cancelled: boolean;
 }
 

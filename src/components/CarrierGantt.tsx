@@ -1,10 +1,13 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import type { CarrierStats, PaceStatus } from '../types/schedule';
 import {
-  getTruckDepartures,
+  trucksToDepartures,
   getDefaultCutoffsByCarrier,
+  getCutoffsByCarrierFromTrucks,
   type TruckDeparture,
+  type TruckScheduleItemInput,
 } from '../utils/truckSchedule';
+import type { TruckScheduleItem } from '../types/schedule';
 
 const PACE_COLORS: Record<PaceStatus, string> = {
   on_track: '#10b981',
@@ -21,23 +24,13 @@ const CARRIER_COLORS: Record<string, string> = {
   Other: '#64748b',
 };
 
-function msToTimeStr(ms: number): string {
-  const d = new Date(ms);
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-}
-
-function timeStrToMs(timeStr: string, baseDate: Date): number {
-  const [h, m] = timeStr.trim().split(':').map((s) => parseInt(s, 10) || 0);
-  const d = new Date(baseDate);
-  d.setHours(h, m, 0, 0);
-  return d.getTime();
-}
-
 interface CarrierGanttProps {
   stats: CarrierStats[];
+  /** Editable truck schedule - drives markers and default cutoffs */
+  trucks?: TruckScheduleItem[];
+  /** Cutoff times per carrier (from sidebar settings). When provided, controlled mode. */
+  cutoffsByCarrier?: Record<string, number>;
   className?: string;
-  /** Called when cutoffs change (e.g. for parent to persist or recalc) */
-  onCutoffChange?: (cutoffsByCarrier: Record<string, number>) => void;
 }
 
 const ROW_HEIGHT = 40;
@@ -47,8 +40,9 @@ const TIMELINE_HOURS_END = 23;
 
 export function CarrierGantt({
   stats,
+  trucks: trucksProp = [],
+  cutoffsByCarrier: cutoffsProp,
   className = '',
-  onCutoffChange,
 }: CarrierGanttProps) {
   const today = useMemo(() => {
     const d = new Date();
@@ -58,12 +52,23 @@ export function CarrierGantt({
 
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 60 * 1000);
+    const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
 
-  const defaultCutoffs = useMemo(getDefaultCutoffsByCarrier, []);
-  const [cutoffsByCarrier, setCutoffsByCarrier] = useState<Record<string, number>>(() => {
+  const defaultCutoffsFromSchedule = useMemo(getDefaultCutoffsByCarrier, []);
+  const defaultCutoffs = useMemo(() => {
+    if (trucksProp.length > 0) {
+      const isCancelled = (t: TruckScheduleItemInput): boolean => {
+        const c = (t as TruckScheduleItem).cancelled;
+        return c === true;
+      };
+      const fromTrucks = getCutoffsByCarrierFromTrucks(trucksProp, isCancelled);
+      return Object.keys(fromTrucks).length > 0 ? fromTrucks : defaultCutoffsFromSchedule;
+    }
+    return defaultCutoffsFromSchedule;
+  }, [trucksProp, defaultCutoffsFromSchedule]);
+  const [localCutoffs, setLocalCutoffs] = useState<Record<string, number>>(() => {
     const init: Record<string, number> = {};
     for (const s of stats) {
       init[s.carrier] = s.cutoffMs ?? defaultCutoffs[s.carrier] ?? today.getTime() + 12 * 60 * 60 * 1000;
@@ -74,9 +79,13 @@ export function CarrierGantt({
     return init;
   });
 
-  // Sync cutoffs when stats carriers change
+  const cutoffsByCarrier = cutoffsProp ?? localCutoffs;
+  const isControlled = cutoffsProp != null;
+
+  // Sync local cutoffs when stats or trucks change (uncontrolled only)
   useEffect(() => {
-    setCutoffsByCarrier((prev) => {
+    if (isControlled) return;
+    setLocalCutoffs((prev) => {
       let changed = false;
       const next = { ...prev };
       for (const s of stats) {
@@ -85,22 +94,22 @@ export function CarrierGantt({
           changed = true;
         }
       }
+      for (const [k, v] of Object.entries(defaultCutoffs)) {
+        if (next[k] == null) {
+          next[k] = v;
+          changed = true;
+        }
+      }
       return changed ? next : prev;
     });
-  }, [stats, defaultCutoffs, today]);
+  }, [stats, defaultCutoffs, today, isControlled]);
 
-  const handleCutoffChange = useCallback(
-    (carrier: string, ms: number) => {
-      setCutoffsByCarrier((prev) => {
-        const next = { ...prev, [carrier]: ms };
-        onCutoffChange?.(next);
-        return next;
-      });
-    },
-    [onCutoffChange]
-  );
-
-  const trucks = useMemo(getTruckDepartures, []);
+  const trucks = useMemo(() => {
+    if (trucksProp.length > 0) {
+      return trucksToDepartures(trucksProp, (t) => (t as TruckScheduleItem).cancelled === true);
+    }
+    return trucksToDepartures([]);
+  }, [trucksProp]);
   const carriers = useMemo(() => {
     const order = new Map<string, number>();
     stats.forEach((s, i) => order.set(s.carrier, i));
@@ -150,38 +159,6 @@ export function CarrierGantt({
         </span>
       </div>
 
-      {/* Editable cutoff table */}
-      <div className="px-3 py-2 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80">
-        <div className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">
-          Cutoff times (edit for extra trucks or cancellations)
-        </div>
-        <div className="flex flex-wrap gap-x-4 gap-y-1">
-          {carriers.map((carrier) => {
-            const ms = cutoffsByCarrier[carrier] ?? defaultCutoffs[carrier];
-            const timeStr = ms != null ? msToTimeStr(ms) : '--:--';
-            return (
-              <div key={carrier} className="flex items-center gap-2">
-                <span className="text-xs font-medium text-slate-700 dark:text-slate-300 min-w-[90px]">
-                  {carrier}
-                </span>
-                <input
-                  type="time"
-                  value={timeStr}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (v) {
-                      const ms = timeStrToMs(v, today);
-                      handleCutoffChange(carrier, ms);
-                    }
-                  }}
-                  className="text-xs w-20 px-1.5 py-0.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
-                />
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
       {/* Gantt chart */}
       <div className="flex-1 min-h-0 overflow-auto p-2">
         <div className="min-w-[400px] flex gap-0">
@@ -220,10 +197,18 @@ export function CarrierGantt({
             {/* Rows + now line */}
             <div className="relative">
               {nowInRange && (
-                <div
-                  className="absolute top-0 bottom-0 w-0.5 bg-red-500 dark:bg-red-400 z-20 pointer-events-none"
-                  style={{ left: `${nowX}%` }}
-                />
+                <>
+                  <div
+                    className="absolute -top-5 left-0 -translate-x-1/2 z-20 pointer-events-none text-[10px] font-semibold tabular-nums text-red-600 dark:text-red-400 whitespace-nowrap"
+                    style={{ left: `${nowX}%` }}
+                  >
+                    {new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  </div>
+                  <div
+                    className="absolute top-0 bottom-0 w-0.5 bg-red-500 dark:bg-red-400 z-20 pointer-events-none"
+                    style={{ left: `${nowX}%` }}
+                  />
+                </>
               )}
               {carriers.map((carrier) => {
                 const cutoffMs = cutoffsByCarrier[carrier] ?? defaultCutoffs[carrier];
@@ -253,7 +238,7 @@ export function CarrierGantt({
                       />
                     </div>
 
-                    {/* Truck markers (milestones) */}
+                    {/* Truck markers (milestones): Carrier Truck N HH:mm */}
                     {carrierTrucks.map((t) => {
                       const x = xFromMs(t.departureMs);
                       if (x < -2 || x > 102) return null;
@@ -261,22 +246,29 @@ export function CarrierGantt({
                       return (
                         <div
                           key={`${t.carrier}-${t.time}-${t.name}`}
-                          className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10"
+                          className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10 flex items-center gap-0.5"
                           style={{ left: `${x}%` }}
-                          title={`${t.name} @ ${t.time}${isPast ? ' (departed)' : ''}`}
+                          title={`${t.carrierDisplay} ${t.name} @ ${t.time}${isPast ? ' (departed)' : ''}`}
                         >
                           <div
                             className={`
-                              w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold
-                              border-2 shadow-sm
+                              flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] border shadow-sm
                               ${isPast
-                                ? 'bg-slate-200 dark:bg-slate-600 border-slate-400 dark:border-slate-500 text-slate-600 dark:text-slate-300'
-                                : 'bg-white dark:bg-slate-700 border-slate-400 dark:border-slate-500 text-slate-800 dark:text-slate-100'
+                                ? 'bg-slate-100 dark:bg-slate-700 border-slate-300 dark:border-slate-600 text-slate-400 dark:text-slate-500'
+                                : 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-600'
                               }
                             `}
-                            style={{ borderColor: isPast ? undefined : color }}
+                            style={!isPast ? { borderColor: color } : undefined}
                           >
-                            {t.truckNumber}
+                            <span
+                              className={isPast ? 'text-slate-400 dark:text-slate-500' : 'font-semibold'}
+                              style={!isPast ? { color } : undefined}
+                            >
+                              {t.carrierDisplay}
+                            </span>
+                            <span className={isPast ? 'text-slate-400 dark:text-slate-500' : 'text-slate-700 dark:text-slate-300'}>
+                              {t.name} {t.time}
+                            </span>
                           </div>
                         </div>
                       );
@@ -316,7 +308,7 @@ export function CarrierGantt({
           <span className="w-3 h-0.5 bg-red-500" />
           Now
         </span>
-        <span>Numbered circles = truck departure</span>
+        <span>Labels = carrier + truck + time (greyed after departure)</span>
       </div>
     </div>
   );

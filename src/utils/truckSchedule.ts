@@ -7,6 +7,19 @@ export const TRUCK_CARRIER_TO_DISPLAY: Record<string, string> = {
   DHL: 'DHL',
 };
 
+/** Format truck for display: "CARRIER NAME TIME" e.g. "DHL Truck 1 13:00". */
+export function formatTruckDisplayLabel(
+  carrierDisplay: string,
+  name: string,
+  timeOrMs: string | number
+): string {
+  const time =
+    typeof timeOrMs === 'number'
+      ? new Date(timeOrMs).toTimeString().slice(0, 5)
+      : timeOrMs;
+  return `${carrierDisplay} ${name} ${time}`;
+}
+
 export interface TruckDeparture {
   name: string;
   time: string;
@@ -53,6 +66,68 @@ export function getDefaultCutoffsByCarrier(): Record<string, number> {
   for (const d of departures) {
     const prev = out[d.carrierDisplay];
     if (prev == null || d.departureMs > prev) out[d.carrierDisplay] = d.departureMs;
+  }
+  return out;
+}
+
+/** Editable truck item shape (name/label, time/departureMs, carrier). */
+export interface TruckScheduleItemInput {
+  label: string;
+  departureMs: number;
+  carrier: string;
+  /** When true, truck is cancelled and excluded from Gantt. */
+  cancelled?: boolean;
+}
+
+/** Convert editable truck items to TruckDeparture[] for Gantt. */
+export function trucksToDepartures(
+  items: TruckScheduleItemInput[],
+  cancelled?: (item: TruckScheduleItemInput) => boolean
+): TruckDeparture[] {
+  const filtered = cancelled
+    ? items.filter((t) => !cancelled(t))
+    : items;
+  const byCarrier = new Map<string, { item: TruckScheduleItemInput; carrierDisplay: string }[]>();
+  for (const t of filtered) {
+    const carrierDisplay = TRUCK_CARRIER_TO_DISPLAY[t.carrier] ?? t.carrier;
+    const list = byCarrier.get(carrierDisplay) ?? [];
+    list.push({ item: t, carrierDisplay });
+    byCarrier.set(carrierDisplay, list);
+  }
+  const result: TruckDeparture[] = [];
+  for (const [, list] of byCarrier) {
+    list.sort((a, b) => a.item.departureMs - b.item.departureMs);
+    list.forEach(({ item: t, carrierDisplay }, i) => {
+      const numMatch = t.label.match(/Truck\s*(\d+)/i);
+      const truckNumber = numMatch ? parseInt(numMatch[1], 10) : i + 1;
+      result.push({
+        name: t.label,
+        time: new Date(t.departureMs).toTimeString().slice(0, 5),
+        carrier: t.carrier,
+        carrierDisplay,
+        departureMs: t.departureMs,
+        truckNumber,
+      });
+    });
+  }
+  result.sort((a, b) => a.departureMs - b.departureMs);
+  return result;
+}
+
+/** Predicate: true = item is cancelled (excluded from cutoffs). */
+export type TruckCancelledPredicate = (item: TruckScheduleItemInput) => boolean;
+
+/** Cutoffs per carrier from editable truck items (latest departure per carrier). */
+export function getCutoffsByCarrierFromTrucks(
+  items: TruckScheduleItemInput[],
+  cancelled?: TruckCancelledPredicate
+): Record<string, number> {
+  const filtered = cancelled ? items.filter((t) => !cancelled(t)) : items;
+  const out: Record<string, number> = {};
+  for (const t of filtered) {
+    const display = TRUCK_CARRIER_TO_DISPLAY[t.carrier] ?? t.carrier;
+    const prev = out[display];
+    if (prev == null || t.departureMs > prev) out[display] = t.departureMs;
   }
   return out;
 }

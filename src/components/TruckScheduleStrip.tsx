@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { TruckScheduleItem } from '../types/schedule';
+import { TRUCK_CARRIER_TO_DISPLAY, formatTruckDisplayLabel } from '../utils/truckSchedule';
 
 const COUNTDOWN_UPDATE_MS = 1000;
 
@@ -48,12 +49,21 @@ const URGENCY_CLASSES: Record<ReturnType<typeof urgencyLevel>, string> = {
   departed: 'bg-slate-200 dark:bg-slate-600 border-slate-300 dark:border-slate-500 opacity-75',
 };
 
+const CARRIER_KEYS = Object.keys(TRUCK_CARRIER_TO_DISPLAY);
+
+export interface AddTruckData {
+  name: string;
+  time: string;
+  carrier: string;
+}
+
 interface TruckScheduleStripProps {
   trucks: TruckScheduleItem[];
   onTrucksChange: (trucks: TruckScheduleItem[]) => void;
   onCancelTruck?: (id: string) => void;
   onRestoreTruck?: (id: string) => void;
-  onAddTruck?: () => void;
+  /** Called when user submits add-truck form with name, time, carrier */
+  onAddTruck?: (truck: AddTruckData) => void;
   className?: string;
 }
 
@@ -67,6 +77,36 @@ export function TruckScheduleStrip({
 }: TruckScheduleStripProps) {
   const [now, setNow] = useState(() => Date.now());
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [addForm, setAddForm] = useState<AddTruckData>(() => {
+    const maxNum = trucks.reduce((acc, t) => {
+      const m = t.label.match(/Truck\s*(\d+)/i);
+      return Math.max(acc, m ? parseInt(m[1], 10) : 0);
+    }, 0);
+    const d = new Date();
+    d.setMinutes(d.getMinutes() + 60);
+    return {
+      name: `Truck ${maxNum + 1}`,
+      time: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
+      carrier: CARRIER_KEYS[0] ?? 'GEODIS',
+    };
+  });
+
+  useEffect(() => {
+    if (showAddForm) {
+      const maxNum = trucks.reduce((acc, t) => {
+        const m = t.label.match(/Truck\s*(\d+)/i);
+        return Math.max(acc, m ? parseInt(m[1], 10) : 0);
+      }, 0);
+      const d = new Date();
+      d.setMinutes(d.getMinutes() + 60);
+      setAddForm((prev) => ({
+        ...prev,
+        name: `Truck ${maxNum + 1}`,
+        time: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
+      }));
+    }
+  }, [showAddForm, trucks.length]);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), COUNTDOWN_UPDATE_MS);
@@ -110,6 +150,12 @@ export function TruckScheduleStrip({
     [trucks, onTrucksChange]
   );
 
+  const handleSubmitAdd = useCallback(() => {
+    if (!onAddTruck) return;
+    onAddTruck(addForm);
+    setShowAddForm(false);
+  }, [onAddTruck, addForm]);
+
   const visibleTrucks = trucks.filter((t) => !t.cancelled);
   const cancelledTrucks = trucks.filter((t) => t.cancelled);
 
@@ -124,13 +170,48 @@ export function TruckScheduleStrip({
         {onAddTruck && (
           <button
             type="button"
-            onClick={onAddTruck}
+            onClick={() => setShowAddForm((v) => !v)}
             className="text-xs font-medium px-2 py-1 rounded bg-blue-600 dark:bg-blue-500 text-white hover:bg-blue-700 dark:hover:bg-blue-600"
           >
-            + Add truck
+            {showAddForm ? 'Cancel' : '+ Add truck'}
           </button>
         )}
       </div>
+      {showAddForm && onAddTruck && (
+        <div className="flex flex-wrap items-center gap-2 rounded border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-800/80 p-2">
+          <input
+            type="text"
+            placeholder="Name"
+            value={addForm.name}
+            onChange={(e) => setAddForm((f) => ({ ...f, name: e.target.value }))}
+            className="text-xs w-24 px-2 py-1 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
+          />
+          <input
+            type="time"
+            value={addForm.time}
+            onChange={(e) => setAddForm((f) => ({ ...f, time: e.target.value }))}
+            className="text-xs w-24 px-2 py-1 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
+          />
+          <select
+            value={addForm.carrier}
+            onChange={(e) => setAddForm((f) => ({ ...f, carrier: e.target.value }))}
+            className="text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
+          >
+            {CARRIER_KEYS.map((key) => (
+              <option key={key} value={key}>
+                {TRUCK_CARRIER_TO_DISPLAY[key]}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={handleSubmitAdd}
+            className="text-xs font-medium px-2 py-1 rounded bg-emerald-600 dark:bg-emerald-500 text-white hover:bg-emerald-700 dark:hover:bg-emerald-600"
+          >
+            Add
+          </button>
+        </div>
+      )}
       <div className="flex flex-wrap gap-1.5">
         {visibleTrucks.map((truck) => {
           const msUntil = truck.departureMs - now;
@@ -142,7 +223,11 @@ export function TruckScheduleStrip({
               className={`inline-flex items-center gap-2 rounded border px-2 py-1.5 text-xs transition-colors ${URGENCY_CLASSES[urgency]}`}
             >
               <span className="font-medium text-slate-800 dark:text-slate-200">
-                {truck.label}
+                {formatTruckDisplayLabel(
+                  TRUCK_CARRIER_TO_DISPLAY[truck.carrier] ?? truck.carrier,
+                  truck.label,
+                  truck.departureMs
+                )}
               </span>
               {isEditing ? (
                 <input
@@ -171,7 +256,7 @@ export function TruckScheduleStrip({
                   </span>
                   <button
                 type="button"
-                aria-label={`Cancel ${truck.label}`}
+                aria-label={`Cancel ${formatTruckDisplayLabel(TRUCK_CARRIER_TO_DISPLAY[truck.carrier] ?? truck.carrier, truck.label, truck.departureMs)}`}
                 onClick={() => handleCancel(truck.id)}
                 className="p-0.5 rounded hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 hover:text-red-600 dark:hover:text-red-400"
               >
@@ -196,11 +281,11 @@ export function TruckScheduleStrip({
                   className="inline-flex items-center gap-1.5 rounded border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/50 px-2 py-1 text-xs opacity-80"
                 >
                   <span className="text-slate-500 dark:text-slate-400 line-through">
-                    {truck.label}
+                    {formatTruckDisplayLabel(TRUCK_CARRIER_TO_DISPLAY[truck.carrier] ?? truck.carrier, truck.label, truck.departureMs)}
                   </span>
                   <button
                     type="button"
-                    aria-label={`Restore ${truck.label}`}
+                    aria-label={`Restore ${formatTruckDisplayLabel(TRUCK_CARRIER_TO_DISPLAY[truck.carrier] ?? truck.carrier, truck.label, truck.departureMs)}`}
                     onClick={() => handleRestore(truck.id)}
                     className="text-emerald-600 dark:text-emerald-400 hover:underline"
                   >
