@@ -10,6 +10,13 @@ import { countParcelsForDelivery, countPalletsForDelivery, formatDurationMs, max
 import { getCarrierOrder, getCarrierFromShipMethod } from './utils/carriers.ts';
 import * as XLSX from 'xlsx';
 
+import type { TruckScheduleItem } from './types/schedule';
+import { TruckScheduleStrip } from './components/TruckScheduleStrip';
+import { CarrierGrid } from './components/CarrierGrid';
+import { AlertPanel } from './components/AlertPanel';
+import { computeCarrierStats } from './utils/carrierStats';
+import { computeAlerts } from './utils/alerts';
+
 import cytivaLogo from './assets/Cytiva.svg';
 import { ResizablePanel, clampRectToBounds, clampRectNoOverlap, type PanelRect } from './ResizablePanel';
 
@@ -82,17 +89,49 @@ function App() {
   const filterPopupRef = useRef<HTMLDivElement>(null);
   const dashboardRef = useRef<HTMLDivElement>(null);
   const panelVisibleRef = useRef<Record<string, boolean>>({});
+  const previousBurnRateRef = useRef<Record<string, number>>({});
+
+  const getInitialTrucks = useCallback((): TruckScheduleItem[] => {
+    const now = Date.now();
+    const base = new Date(now);
+    base.setMinutes(0, 0, 0);
+    return Array.from({ length: 13 }, (_, i) => {
+      const d = new Date(base.getTime() + (i + 1) * (60 * 60 * 1000));
+      return {
+        id: `truck-${i + 1}`,
+        label: `Truck ${i + 1}`,
+        departureMs: d.getTime(),
+        cancelled: false,
+      };
+    });
+  }, []);
+
+  const [trucks, setTrucks] = useState<TruckScheduleItem[]>(getInitialTrucks);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((k) => k + 1), 60 * 1000);
+    return () => clearInterval(t);
+  }, []);
 
   const getInitialPanelLayout = useCallback((): Record<string, PanelRect> => ({
-    carrier: { x: 0, y: 0, w: 50, h: 38 },
-    step: { x: 50, y: 0, w: 50, h: 38 },
-    table: { x: 0, y: 38, w: 100, h: 62 },
+    carrier: { x: 0, y: 0, w: 50, h: 28 },
+    step: { x: 50, y: 0, w: 50, h: 28 },
+    truckSchedule: { x: 0, y: 28, w: 100, h: 14 },
+    carrierGrid: { x: 0, y: 42, w: 65, h: 28 },
+    alertPanel: { x: 65, y: 42, w: 35, h: 28 },
+    table: { x: 0, y: 70, w: 100, h: 30 },
   }), []);
 
-  type PanelType = 'carrier' | 'step' | 'table';
-  const [panelOrder, setPanelOrder] = useState<string[]>(['carrier', 'step', 'table']);
-  const [panelVisible, setPanelVisible] = useState<Record<string, boolean>>({ carrier: true, step: true, table: true });
-  const [panelTypes, setPanelTypes] = useState<Record<string, PanelType>>({ carrier: 'carrier', step: 'step', table: 'table' });
+  type PanelType = 'carrier' | 'step' | 'table' | 'truckSchedule' | 'carrierGrid' | 'alertPanel';
+  const [panelOrder, setPanelOrder] = useState<string[]>(['carrier', 'step', 'table', 'truckSchedule', 'carrierGrid', 'alertPanel']);
+  const [panelVisible, setPanelVisible] = useState<Record<string, boolean>>({
+    carrier: true, step: true, table: true,
+    truckSchedule: true, carrierGrid: true, alertPanel: true,
+  });
+  const [panelTypes, setPanelTypes] = useState<Record<string, PanelType>>({
+    carrier: 'carrier', step: 'step', table: 'table',
+    truckSchedule: 'truckSchedule', carrierGrid: 'carrierGrid', alertPanel: 'alertPanel',
+  });
   const [panelLayout, setPanelLayout] = useState<Record<string, PanelRect>>(getInitialPanelLayout);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   useEffect(() => { panelVisibleRef.current = panelVisible; }, [panelVisible]);
@@ -271,6 +310,74 @@ function App() {
   const maxCarrierDisplay = Math.max(1, ...carrierBarsToShow.map((c) => c.count));
   const maxStepDisplay = Math.max(1, ...stepBarsToShow.map((s) => s.count));
 
+  const nowMs = Date.now();
+  const cutoffMs =
+    trucks.filter((t) => !t.cancelled).length > 0
+      ? Math.min(...trucks.filter((t) => !t.cancelled).map((t) => t.departureMs))
+      : null;
+
+  const carrierStats = useMemo(() => {
+    if (!shipMethodKey || !containerTypeKey || !outermostLpnKey) return [];
+    return computeCarrierStats({
+      rows,
+      shipMethodKey,
+      containerTypeKey,
+      outermostLpnKey,
+      dispatchedTimestampKey,
+      dropOffTimestampKey,
+      cutoffMs,
+      nowMs,
+    });
+  }, [
+    rows,
+    shipMethodKey,
+    containerTypeKey,
+    outermostLpnKey,
+    dispatchedTimestampKey,
+    dropOffTimestampKey,
+    cutoffMs,
+    nowMs,
+    tick,
+  ]);
+
+  const alerts = useMemo(() => {
+    return computeAlerts({
+      rows,
+      shipMethodKey,
+      stepKey,
+      trucks,
+      carrierStats,
+    previousBurnRateByCarrier: previousBurnRateRef.current,
+    nowMs,
+  });
+  }, [rows, shipMethodKey, stepKey, trucks, carrierStats, nowMs, tick]);
+
+  useEffect(() => {
+    carrierStats.forEach((s) => {
+      previousBurnRateRef.current[s.carrier] = s.burnRatePalletsPerHour;
+    });
+  }, [carrierStats]);
+
+  const handleAddTruck = useCallback(() => {
+    const maxNum = trucks.reduce((acc, t) => {
+      const m = t.label.match(/Truck (\d+)/);
+      const n = m ? parseInt(m[1], 10) : 0;
+      return Math.max(acc, n);
+    }, 0);
+    const next = maxNum + 1;
+    const d = new Date(cutoffMs ?? Date.now() + 2 * 60 * 60 * 1000);
+    d.setTime(d.getTime() + 60 * 60 * 1000);
+    setTrucks((prev) => [
+      ...prev,
+      {
+        id: `truck-${next}-${Date.now()}`,
+        label: `Truck ${next}`,
+        departureMs: d.getTime(),
+        cancelled: false,
+      },
+    ]);
+  }, [trucks, cutoffMs]);
+
   const loadFromUrl = useCallback(async () => {
     setError(null);
     setLoading(true);
@@ -290,9 +397,10 @@ function App() {
       setDispatchedTimestampKey(dtsKey ?? '');
       setDropOffTimestampKey(dotsKey ?? '');
       setPanelLayout(getInitialPanelLayout());
-      setPanelOrder(['carrier', 'step', 'table']);
-      setPanelVisible({ carrier: true, step: true, table: true });
-      setPanelTypes({ carrier: 'carrier', step: 'step', table: 'table' });
+      setPanelOrder(['carrier', 'step', 'table', 'truckSchedule', 'carrierGrid', 'alertPanel']);
+      setPanelVisible({ carrier: true, step: true, table: true, truckSchedule: true, carrierGrid: true, alertPanel: true });
+      setPanelTypes({ carrier: 'carrier', step: 'step', table: 'table', truckSchedule: 'truckSchedule', carrierGrid: 'carrierGrid', alertPanel: 'alertPanel' });
+      setTrucks(getInitialTrucks());
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load report');
       setRows([]);
@@ -370,9 +478,10 @@ function App() {
           setDispatchedTimestampKey(dispatchedTimestampKey);
           setDropOffTimestampKey(dropOffTimestampKey);
           setPanelLayout(getInitialPanelLayout());
-          setPanelOrder(['carrier', 'step', 'table']);
-          setPanelVisible({ carrier: true, step: true, table: true });
-          setPanelTypes({ carrier: 'carrier', step: 'step', table: 'table' });
+          setPanelOrder(['carrier', 'step', 'table', 'truckSchedule', 'carrierGrid', 'alertPanel']);
+          setPanelVisible({ carrier: true, step: true, table: true, truckSchedule: true, carrierGrid: true, alertPanel: true });
+          setPanelTypes({ carrier: 'carrier', step: 'step', table: 'table', truckSchedule: 'truckSchedule', carrierGrid: 'carrierGrid', alertPanel: 'alertPanel' });
+          setTrucks(getInitialTrucks());
         } catch (err) {
           setError(err instanceof Error ? err.message : 'Failed to parse file');
           setRows([]);
@@ -461,6 +570,25 @@ function App() {
     setPanelVisible((prev) => ({ ...prev, [id]: true }));
   }, []);
 
+  const getPanelTitle = useCallback((id: string, type: PanelType) => {
+    switch (type) {
+      case 'carrier':
+        return `Deliveries per carrier (Total: ${totalDeliveries.toLocaleString()})`;
+      case 'step':
+        return `Lines per step status (Total: ${totalLines.toLocaleString()})`;
+      case 'table':
+        return `Deliveries summary (${deliveriesInTableCount.toLocaleString()} delivery${deliveriesInTableCount !== 1 ? 's' : ''})`;
+      case 'truckSchedule':
+        return 'Truck schedule';
+      case 'carrierGrid':
+        return 'Carrier grid';
+      case 'alertPanel':
+        return 'Alerts';
+      default:
+        return id;
+    }
+  }, [totalDeliveries, totalLines, deliveriesInTableCount]);
+
   const addPanel = useCallback((type: PanelType) => {
     const existingOfType = panelOrder.filter((i) => panelTypes[i] === type);
     const newId = existingOfType.length === 0 ? type : `${type}-${existingOfType.length + 1}`;
@@ -470,19 +598,6 @@ function App() {
     setPanelVisible((prev) => ({ ...prev, [newId]: true }));
     setPanelTypes((prev) => ({ ...prev, [newId]: type }));
   }, [panelOrder, panelTypes]);
-
-  const getPanelTitle = useCallback((id: string, type: PanelType) => {
-    switch (type) {
-      case 'carrier':
-        return `Deliveries per carrier (Total: ${totalDeliveries.toLocaleString()})`;
-      case 'step':
-        return `Lines per step status (Total: ${totalLines.toLocaleString()})`;
-      case 'table':
-        return `Deliveries summary (${deliveriesInTableCount.toLocaleString()} delivery${deliveriesInTableCount !== 1 ? 's' : ''})`;
-      default:
-        return id;
-    }
-  }, [totalDeliveries, totalLines, deliveriesInTableCount]);
 
   const visiblePanelIds = panelOrder.filter(
     (id) => panelVisible[id] !== false && (panelTypes[id] !== 'table' || deliveryIdKey)
@@ -611,28 +726,58 @@ function App() {
               </div>
               {sidebarOpen && (
                 <div className="flex flex-col gap-1 p-2 overflow-auto">
-                  {minimizedPanelIds.length > 0 && (
-                    <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Minimized</div>
-                  )}
-                  {minimizedPanelIds.map((id) => {
-                    const type = panelTypes[id];
-                    const label = type === 'carrier' ? 'Deliveries per carrier' : type === 'step' ? 'Lines per step' : 'Deliveries summary';
-                    const suffix = id !== type ? ` #${id.split('-')[1] || '2'}` : '';
-                    return (
-                      <button
-                        key={id}
-                        type="button"
-                        onClick={() => restorePanel(id)}
-                        className="text-left px-3 py-2 rounded-lg bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-600 text-sm text-slate-800 dark:text-slate-100 transition-colors"
-                      >
-                        <span className="font-medium">{label}{suffix}</span>
-                        <span className="block text-xs text-slate-500 dark:text-slate-400 mt-0.5">Click to restore</span>
-                      </button>
-                    );
-                  })}
+                  {minimizedPanelIds.length > 0 ? (
+                    <>
+                      <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Not on dashboard</div>
+                      {minimizedPanelIds.map((id) => {
+                        const type = panelTypes[id];
+                        const labels: Record<PanelType, string> = {
+                          carrier: 'Deliveries per carrier',
+                          step: 'Lines per step',
+                          table: 'Deliveries summary',
+                          truckSchedule: 'Truck schedule',
+                          carrierGrid: 'Carrier grid',
+                          alertPanel: 'Alerts',
+                        };
+                        const label = labels[type] ?? id;
+                        return (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() => restorePanel(id)}
+                            className="text-left px-3 py-2 rounded-lg bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-600 text-sm text-slate-800 dark:text-slate-100 transition-colors"
+                          >
+                            <span className="font-medium">{label}</span>
+                            <span className="block text-xs text-slate-500 dark:text-slate-400 mt-0.5">Click to show on dashboard</span>
+                          </button>
+                        );
+                      })}
+                    </>
+                  ) : null}
                   <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-600">
                     <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Add panel</div>
                     <div className="flex flex-col gap-1">
+                      <button
+                        type="button"
+                        onClick={() => addPanel('truckSchedule')}
+                        className="text-left px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-sm text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-600"
+                      >
+                        + Truck schedule
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => addPanel('carrierGrid')}
+                        className="text-left px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-sm text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-600"
+                      >
+                        + Carrier grid
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => addPanel('alertPanel')}
+                        className="text-left px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-sm text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-600"
+                      >
+                        + Alerts
+                      </button>
                       <button
                         type="button"
                         onClick={() => addPanel('carrier')}
@@ -850,6 +995,26 @@ function App() {
                 <p className="text-slate-500 dark:text-slate-400 text-xs">No “Next Outbound Step” column found in this report.</p>
               )}
               </div>
+              )}
+              {type === 'truckSchedule' && (
+                <div className="h-full min-h-0 overflow-auto flex flex-col">
+                  <TruckScheduleStrip
+                    trucks={trucks}
+                    onTrucksChange={setTrucks}
+                    onAddTruck={handleAddTruck}
+                    className="flex-1 min-h-0"
+                  />
+                </div>
+              )}
+              {type === 'carrierGrid' && (
+                <div className="h-full min-h-0 overflow-auto">
+                  <CarrierGrid stats={carrierStats} className="h-full" />
+                </div>
+              )}
+              {type === 'alertPanel' && (
+                <div className="h-full min-h-0 flex flex-col">
+                  <AlertPanel alerts={alerts} className="flex-1 min-h-0" />
+                </div>
               )}
               {type === 'table' && (
               <div className="h-full flex flex-col min-h-0 overflow-hidden">

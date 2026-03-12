@@ -101,8 +101,8 @@ export function ResizablePanel({ id, rect, title, onMove, onResize, onMinimize, 
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); onMinimize(); }}
             className="shrink-0 p-1 rounded text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
-            aria-label="Minimize panel"
-            title="Minimize to sidebar"
+            aria-label="Remove from dashboard"
+            title="Turn off — show again from sidebar"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" /></svg>
           </button>
