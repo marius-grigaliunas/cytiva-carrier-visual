@@ -81,6 +81,7 @@ function App() {
   const [tableSort, setTableSort] = useState<{ key: TableColumnKey; dir: 'asc' | 'desc' } | null>(null);
   const filterPopupRef = useRef<HTMLDivElement>(null);
   const dashboardRef = useRef<HTMLDivElement>(null);
+  const panelVisibleRef = useRef<Record<string, boolean>>({});
 
   const getInitialPanelLayout = useCallback((): Record<string, PanelRect> => ({
     carrier: { x: 0, y: 0, w: 50, h: 38 },
@@ -88,7 +89,13 @@ function App() {
     table: { x: 0, y: 38, w: 100, h: 62 },
   }), []);
 
+  type PanelType = 'carrier' | 'step' | 'table';
+  const [panelOrder, setPanelOrder] = useState<string[]>(['carrier', 'step', 'table']);
+  const [panelVisible, setPanelVisible] = useState<Record<string, boolean>>({ carrier: true, step: true, table: true });
+  const [panelTypes, setPanelTypes] = useState<Record<string, PanelType>>({ carrier: 'carrier', step: 'step', table: 'table' });
   const [panelLayout, setPanelLayout] = useState<Record<string, PanelRect>>(getInitialPanelLayout);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  useEffect(() => { panelVisibleRef.current = panelVisible; }, [panelVisible]);
 
   useEffect(() => {
     try {
@@ -283,6 +290,9 @@ function App() {
       setDispatchedTimestampKey(dtsKey ?? '');
       setDropOffTimestampKey(dotsKey ?? '');
       setPanelLayout(getInitialPanelLayout());
+      setPanelOrder(['carrier', 'step', 'table']);
+      setPanelVisible({ carrier: true, step: true, table: true });
+      setPanelTypes({ carrier: 'carrier', step: 'step', table: 'table' });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load report');
       setRows([]);
@@ -360,6 +370,9 @@ function App() {
           setDispatchedTimestampKey(dispatchedTimestampKey);
           setDropOffTimestampKey(dropOffTimestampKey);
           setPanelLayout(getInitialPanelLayout());
+          setPanelOrder(['carrier', 'step', 'table']);
+          setPanelVisible({ carrier: true, step: true, table: true });
+          setPanelTypes({ carrier: 'carrier', step: 'step', table: 'table' });
         } catch (err) {
           setError(err instanceof Error ? err.message : 'Failed to parse file');
           setRows([]);
@@ -397,7 +410,7 @@ function App() {
         const rect = prev[id];
         if (!rect) return prev;
         const others = (Object.keys(prev) as string[])
-          .filter((k) => k !== id && (k !== 'table' || deliveryIdKey))
+          .filter((k) => k !== id && panelVisibleRef.current[k] !== false && (k !== 'table' || deliveryIdKey))
           .map((k) => prev[k]);
         let next = {
           ...rect,
@@ -427,7 +440,7 @@ function App() {
         const rect = prev[id];
         if (!rect) return prev;
         const others = (Object.keys(prev) as string[])
-          .filter((k) => k !== id && (k !== 'table' || deliveryIdKey))
+          .filter((k) => k !== id && panelVisibleRef.current[k] !== false && (k !== 'table' || deliveryIdKey))
           .map((k) => prev[k]);
         let next = { ...rect };
         if (edge === 'e' || edge === 'se') next.w = Math.max(MIN_PANEL_W, rect.w + dxPct);
@@ -438,6 +451,44 @@ function App() {
       });
     },
     [deliveryIdKey]
+  );
+
+  const minimizePanel = useCallback((id: string) => {
+    setPanelVisible((prev) => ({ ...prev, [id]: false }));
+  }, []);
+
+  const restorePanel = useCallback((id: string) => {
+    setPanelVisible((prev) => ({ ...prev, [id]: true }));
+  }, []);
+
+  const addPanel = useCallback((type: PanelType) => {
+    const existingOfType = panelOrder.filter((i) => panelTypes[i] === type);
+    const newId = existingOfType.length === 0 ? type : `${type}-${existingOfType.length + 1}`;
+    const defaultRect: PanelRect = { x: 10, y: 10, w: 45, h: 45 };
+    setPanelOrder((prev) => [...prev, newId]);
+    setPanelLayout((prev) => ({ ...prev, [newId]: defaultRect }));
+    setPanelVisible((prev) => ({ ...prev, [newId]: true }));
+    setPanelTypes((prev) => ({ ...prev, [newId]: type }));
+  }, [panelOrder, panelTypes]);
+
+  const getPanelTitle = useCallback((id: string, type: PanelType) => {
+    switch (type) {
+      case 'carrier':
+        return `Deliveries per carrier (Total: ${totalDeliveries.toLocaleString()})`;
+      case 'step':
+        return `Lines per step status (Total: ${totalLines.toLocaleString()})`;
+      case 'table':
+        return `Deliveries summary (${deliveriesInTableCount.toLocaleString()} delivery${deliveriesInTableCount !== 1 ? 's' : ''})`;
+      default:
+        return id;
+    }
+  }, [totalDeliveries, totalLines, deliveriesInTableCount]);
+
+  const visiblePanelIds = panelOrder.filter(
+    (id) => panelVisible[id] !== false && (panelTypes[id] !== 'table' || deliveryIdKey)
+  );
+  const minimizedPanelIds = panelOrder.filter(
+    (id) => !panelVisible[id] && (panelTypes[id] !== 'table' || deliveryIdKey)
   );
 
   return (
@@ -485,27 +536,13 @@ function App() {
           )}
         </button>
       </header>
-      <main className="flex-1 min-h-0 flex flex-col p-4 md:p-6 w-full overflow-hidden">
-        {shipMethodKey && (
-          <div className="flex flex-wrap gap-3 items-center mb-3 shrink-0">
-            <span className="text-sm text-slate-500 dark:text-slate-400">
-              Ship method: <strong>{shipMethodKey}</strong>
-              {deliveryIdKey && (
-                <> · Delivery ID: <strong>{deliveryIdKey}</strong></>
-              )}
-              {stepKey && (
-                <> · Step: <strong>{stepKey}</strong></>
-              )}
-            </span>
-          </div>
-        )}
-
-        <div className="mb-3 min-h-10 flex items-center gap-2 text-sm rounded-lg bg-slate-100 dark:bg-slate-800 px-3 shrink-0">
+      <main className="flex-1 min-h-0 flex flex-col p-2 md:p-3 w-full overflow-hidden">
+        <div className="mb-1 min-h-0 flex items-center gap-1.5 text-xs rounded bg-slate-100 dark:bg-slate-800 px-2 py-1 shrink-0">
           {hasFilter ? (
             <>
               <span className="text-slate-600 dark:text-slate-300">Filter:</span>
               {filterByCarriers.length > 0 && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 dark:bg-blue-900/50 px-2.5 py-0.5 text-blue-800 dark:text-blue-200">
+                <span className="inline-flex items-center gap-0.5 rounded-full bg-blue-100 dark:bg-blue-900/50 px-1.5 py-0.5 text-blue-800 dark:text-blue-200">
                   Carriers: {filterByCarriers.join(', ')}
                   <button
                     type="button"
@@ -518,7 +555,7 @@ function App() {
                 </span>
               )}
               {filterBySteps.length > 0 && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 dark:bg-emerald-900/50 px-2.5 py-0.5 text-emerald-800 dark:text-emerald-200">
+                <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/50 px-1.5 py-0.5 text-emerald-800 dark:text-emerald-200">
                   Steps: {filterBySteps.join(', ')}
                   <button
                     type="button"
@@ -539,14 +576,14 @@ function App() {
               </button>
             </>
           ) : (
-            <span className="text-slate-400 dark:text-slate-500 text-sm">No filters applied</span>
+            <span className="text-slate-400 dark:text-slate-500">No filters applied</span>
           )}
         </div>
 
         {error && (
-          <div className="mb-3 p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg text-red-800 dark:text-red-200 text-sm shrink-0">
+          <div className="mb-2 p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded text-red-800 dark:text-red-200 text-xs shrink-0">
             {error}
-            <p className="mt-2 text-red-600 dark:text-red-300">
+            <p className="mt-1 text-red-600 dark:text-red-300 text-xs">
               Place your report at <code className="bg-red-100 dark:bg-red-900/50 px-1 rounded">public/data/report.xlsx</code> or use
               “Choose Excel file” to pick it from your <code className="bg-red-100 dark:bg-red-900/50 px-1 rounded">data</code> folder.
             </p>
@@ -554,25 +591,113 @@ function App() {
         )}
 
         {rows.length > 0 && (
+          <div className="flex flex-1 min-h-0 min-w-0">
+            {/* Sidebar: minimized panels + add panel */}
+            <aside
+              className={`shrink-0 flex flex-col bg-slate-100 dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 transition-[width] duration-200 overflow-hidden ${
+                sidebarOpen ? 'w-52' : 'w-0'
+              }`}
+            >
+              <div className="flex items-center justify-between px-2 py-2 border-b border-slate-200 dark:border-slate-700">
+                <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 uppercase tracking-wide">Panels</span>
+                <button
+                  type="button"
+                  onClick={() => setSidebarOpen((o) => !o)}
+                  className="p-1 rounded text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-600"
+                  aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+                >
+                  <svg className={`w-4 h-4 transition-transform ${sidebarOpen ? '' : 'rotate-180'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" /></svg>
+                </button>
+              </div>
+              {sidebarOpen && (
+                <div className="flex flex-col gap-1 p-2 overflow-auto">
+                  {minimizedPanelIds.length > 0 && (
+                    <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Minimized</div>
+                  )}
+                  {minimizedPanelIds.map((id) => {
+                    const type = panelTypes[id];
+                    const label = type === 'carrier' ? 'Deliveries per carrier' : type === 'step' ? 'Lines per step' : 'Deliveries summary';
+                    const suffix = id !== type ? ` #${id.split('-')[1] || '2'}` : '';
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => restorePanel(id)}
+                        className="text-left px-3 py-2 rounded-lg bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-600 text-sm text-slate-800 dark:text-slate-100 transition-colors"
+                      >
+                        <span className="font-medium">{label}{suffix}</span>
+                        <span className="block text-xs text-slate-500 dark:text-slate-400 mt-0.5">Click to restore</span>
+                      </button>
+                    );
+                  })}
+                  <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-600">
+                    <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Add panel</div>
+                    <div className="flex flex-col gap-1">
+                      <button
+                        type="button"
+                        onClick={() => addPanel('carrier')}
+                        className="text-left px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-sm text-blue-800 dark:text-blue-200 border border-blue-200 dark:border-blue-800"
+                      >
+                        + Deliveries per carrier
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => addPanel('step')}
+                        className="text-left px-3 py-2 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-sm text-emerald-800 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800"
+                      >
+                        + Lines per step
+                      </button>
+                      {deliveryIdKey && (
+                        <button
+                          type="button"
+                          onClick={() => addPanel('table')}
+                          className="text-left px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-sm text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-600"
+                        >
+                          + Deliveries summary
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </aside>
+            {!sidebarOpen && (
+              <button
+                type="button"
+                onClick={() => setSidebarOpen(true)}
+                className="shrink-0 self-start mt-2 ml-1 p-1.5 rounded-r bg-slate-100 dark:bg-slate-800 border border-l-0 border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700"
+                aria-label="Open panels sidebar"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 12h14" /></svg>
+              </button>
+            )}
           <div
             ref={dashboardRef}
-            className="flex-1 min-h-0 relative w-full"
+            className="flex-1 min-h-0 relative w-full min-w-0"
             style={{ minHeight: 200 }}
           >
+            {visiblePanelIds.map((id) => {
+              const type = panelTypes[id];
+              const rect = panelLayout[id];
+              if (!rect) return null;
+              return (
             <ResizablePanel
-              id="carrier"
-              rect={panelLayout.carrier}
-              title="Deliveries per carrier"
-              onMove={(dx, dy) => handlePanelMove('carrier', dx, dy)}
-              onResize={(edge, dx, dy) => handlePanelResize('carrier', edge, dx, dy)}
-              className="p-4"
+              key={id}
+              id={id}
+              rect={rect}
+              title={getPanelTitle(id, type)}
+              onMove={(dx, dy) => handlePanelMove(id, dx, dy)}
+              onResize={(edge, dx, dy) => handlePanelResize(id, edge, dx, dy)}
+              onMinimize={() => minimizePanel(id)}
+              className="p-2"
             >
+              {type === 'carrier' && (
               <div
                 className="h-full flex flex-col min-h-0 overflow-hidden"
                 onClick={inCarrierSelectionMode ? confirmCarrierSelection : undefined}
               >
                 {inCarrierSelectionMode && (
-                  <div className="flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 px-2 py-1 shadow-sm mb-2 shrink-0">
+                  <div className="flex items-center gap-1 rounded border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 px-1.5 py-0.5 shadow-sm mb-1 shrink-0">
                     <span className="text-xs text-slate-500 dark:text-slate-400 mr-1">Confirm or cancel:</span>
                     <button
                       type="button"
@@ -595,28 +720,24 @@ function App() {
                     </button>
                   </div>
                 )}
-                <p className="text-sm text-slate-500 dark:text-slate-400 mb-2 shrink-0">
-                  Total deliveries: <strong>{totalDeliveries.toLocaleString()}</strong>
-                  {totalLines !== totalDeliveries && (
-                    <span className="text-slate-400 dark:text-slate-500 ml-2">
-                      ({totalLines.toLocaleString()} lines)
-                    </span>
-                  )}
-                  {filterBySteps.length > 0 && (
-                    <span className="block text-emerald-600 dark:text-emerald-400 mt-0.5">
-                      Showing for steps: {filterBySteps.join(', ')}
-                    </span>
-                  )}
-                  {inCarrierSelectionMode && (
-                    <span className="block text-blue-600 dark:text-blue-400 mt-0.5">
-                      {pendingCarriers.size > 0
-                        ? `Selected: ${Array.from(pendingCarriers).join(', ')} — click more carriers or ✓ to filter step chart, X to cancel`
-                        : 'Click one or more carriers, then ✓ to filter step chart'}
-                    </span>
-                  )}
-                </p>
+                {(filterBySteps.length > 0 || inCarrierSelectionMode) && (
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-1 shrink-0">
+                    {filterBySteps.length > 0 && (
+                      <span className="text-emerald-600 dark:text-emerald-400">
+                        Steps: {filterBySteps.join(', ')}
+                      </span>
+                    )}
+                    {inCarrierSelectionMode && (
+                      <span className={filterBySteps.length > 0 ? ' ml-2' : ''}>
+                        {pendingCarriers.size > 0
+                          ? `Selected: ${Array.from(pendingCarriers).join(', ')} — ✓ confirm, X cancel`
+                          : 'Click carriers, then ✓ to filter'}
+                      </span>
+                    )}
+                  </p>
+                )}
                 <div
-                  className="flex-1 min-h-0 overflow-auto space-y-3"
+                  className="flex-1 min-h-0 overflow-auto space-y-1"
                   style={{ minHeight: 0 }}
                   onClick={(e) => e.stopPropagation()}
                 >
@@ -625,49 +746,36 @@ function App() {
                       type="button"
                       key={carrier}
                       onClick={() => toggleCarrierPending(carrier)}
-                      className={`w-full flex items-center gap-4 text-left rounded-lg p-1 -m-1 transition-colors ${
-                        pendingCarriers.has(carrier) ? 'ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-slate-800 bg-blue-50 dark:bg-blue-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'
+                      className={`w-full flex items-center gap-1 text-left rounded p-0.5 -m-0.5 transition-colors ${
+                        pendingCarriers.has(carrier) ? 'ring-2 ring-blue-500 ring-offset-1 dark:ring-offset-slate-800 bg-blue-50 dark:bg-blue-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'
                       }`}
                     >
-                      <div className="w-32 shrink-0 text-sm font-medium text-slate-700 dark:text-slate-300">
+                      <div className="w-24 shrink-0 text-xs font-medium text-slate-700 dark:text-slate-300 truncate" title={carrier}>
                         {carrier}
                       </div>
-                      <div className="flex-1 flex items-center gap-3">
-                        <div className="flex-1 h-8 bg-slate-100 dark:bg-slate-700 rounded overflow-hidden">
+                      <div className="flex-1 flex items-center gap-1 min-w-0">
+                        <div className="flex-1 h-5 bg-slate-100 dark:bg-slate-700 rounded-sm overflow-hidden min-w-0">
                           <div
-                            className="h-full bg-blue-500 rounded min-w-[2px] transition-all duration-300"
+                            className="h-full bg-blue-500 rounded-sm min-w-[2px] transition-all duration-300"
                             style={{ width: `${(count / maxCarrierDisplay) * 100}%` }}
                           />
                         </div>
-                        <span className="w-20 text-right text-sm tabular-nums text-slate-600 dark:text-slate-300 font-medium">
+                        <span className="w-12 shrink-0 text-right text-xs tabular-nums text-slate-600 dark:text-slate-300 font-medium">
                           {count.toLocaleString()}
                         </span>
                       </div>
                     </button>
                   ))}
                 </div>
-                <p className="text-xs text-slate-400 dark:text-slate-500 mt-2 shrink-0">
-                  {inCarrierSelectionMode
-                    ? 'Click carriers to add/remove from selection, ✓ to confirm filter, or X to cancel'
-                    : 'Click a carrier to enter selection mode; select one or more, then confirm to filter the step chart'}
-                </p>
               </div>
-            </ResizablePanel>
-
-            <ResizablePanel
-              id="step"
-              rect={panelLayout.step}
-              title="Lines per step status"
-              onMove={(dx, dy) => handlePanelMove('step', dx, dy)}
-              onResize={(edge, dx, dy) => handlePanelResize('step', edge, dx, dy)}
-              className="p-4"
-            >
+              )}
+              {type === 'step' && (
               <div
                 className="h-full flex flex-col min-h-0 overflow-hidden"
                 onClick={inStepSelectionMode ? confirmStepSelection : undefined}
               >
               {inStepSelectionMode && (
-                <div className="absolute top-4 right-4 flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 px-2 py-1 shadow-sm">
+                <div className="absolute top-2 right-2 flex items-center gap-1 rounded border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 px-1.5 py-0.5 shadow-sm">
                   <span className="text-xs text-slate-500 dark:text-slate-400 mr-1">Confirm or cancel:</span>
                   <button
                     type="button"
@@ -690,24 +798,25 @@ function App() {
                   </button>
                 </div>
                 )}
-                <p className="text-sm text-slate-500 dark:text-slate-400 mb-2 shrink-0">
-                  Total lines: <strong>{totalLines.toLocaleString()}</strong>
-                {filterByCarriers.length > 0 && (
-                  <span className="block text-blue-600 dark:text-blue-400 mt-0.5">
-                    Showing for carriers: {filterByCarriers.join(', ')}
-                  </span>
+                {(filterByCarriers.length > 0 || inStepSelectionMode) && (
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-1 shrink-0">
+                    {filterByCarriers.length > 0 && (
+                      <span className="text-blue-600 dark:text-blue-400">
+                        Carriers: {filterByCarriers.join(', ')}
+                      </span>
+                    )}
+                    {inStepSelectionMode && (
+                      <span className={filterByCarriers.length > 0 ? ' ml-2' : ''}>
+                        {pendingSteps.size > 0
+                          ? `Selected: ${Array.from(pendingSteps).join(', ')} — ✓ confirm, X cancel`
+                          : 'Click steps, then ✓ to filter'}
+                      </span>
+                    )}
+                  </p>
                 )}
-                {inStepSelectionMode && (
-                  <span className="block text-emerald-600 dark:text-emerald-400 mt-0.5">
-                    {pendingSteps.size > 0
-                      ? `Selected: ${Array.from(pendingSteps).join(', ')} — click more steps or ✓ to filter carrier chart, X to cancel`
-                      : 'Click one or more steps, then ✓ to filter carrier chart'}
-                  </span>
-                )}
-              </p>
               {stepKey ? (
                 <div
-                  className="flex-1 min-h-0 overflow-auto space-y-3"
+                  className="flex-1 min-h-0 overflow-auto space-y-1"
                   style={{ minHeight: 0 }}
                   onClick={(e) => e.stopPropagation()}
                 >
@@ -716,21 +825,21 @@ function App() {
                       type="button"
                       key={step}
                       onClick={() => toggleStepPending(step)}
-                      className={`w-full flex items-center gap-4 text-left rounded-lg p-1 -m-1 transition-colors ${
-                        pendingSteps.has(step) ? 'ring-2 ring-emerald-500 ring-offset-2 dark:ring-offset-slate-800 bg-emerald-50 dark:bg-emerald-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'
+                      className={`w-full flex items-center gap-1 text-left rounded p-0.5 -m-0.5 transition-colors ${
+                        pendingSteps.has(step) ? 'ring-2 ring-emerald-500 ring-offset-1 dark:ring-offset-slate-800 bg-emerald-50 dark:bg-emerald-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'
                       }`}
                     >
-                      <div className="w-36 shrink-0 text-sm font-medium text-slate-700 dark:text-slate-300">
+                      <div className="w-28 shrink-0 text-xs font-medium text-slate-700 dark:text-slate-300 truncate" title={step}>
                         {step}
                       </div>
-                      <div className="flex-1 flex items-center gap-3">
-                        <div className="flex-1 h-8 bg-slate-100 dark:bg-slate-700 rounded overflow-hidden">
+                      <div className="flex-1 flex items-center gap-1 min-w-0">
+                        <div className="flex-1 h-5 bg-slate-100 dark:bg-slate-700 rounded-sm overflow-hidden min-w-0">
                           <div
-                            className="h-full bg-emerald-500 rounded min-w-[2px] transition-all duration-300"
+                            className="h-full bg-emerald-500 rounded-sm min-w-[2px] transition-all duration-300"
                             style={{ width: `${(count / maxStepDisplay) * 100}%` }}
                           />
                         </div>
-                        <span className="w-20 text-right text-sm tabular-nums text-slate-600 dark:text-slate-300 font-medium">
+                        <span className="w-12 shrink-0 text-right text-xs tabular-nums text-slate-600 dark:text-slate-300 font-medium">
                           {count.toLocaleString()}
                         </span>
                       </div>
@@ -738,51 +847,38 @@ function App() {
                   ))}
                 </div>
               ) : (
-                <p className="text-slate-500 dark:text-slate-400 text-sm">No “Next Outbound Step” column found in this report.</p>
+                <p className="text-slate-500 dark:text-slate-400 text-xs">No “Next Outbound Step” column found in this report.</p>
               )}
-              <p className="text-xs text-slate-400 dark:text-slate-500 mt-2 shrink-0">
-                {inStepSelectionMode
-                  ? 'Click steps to add/remove from selection, ✓ to confirm filter, or X to cancel'
-                  : 'Click a step to enter selection mode; select one or more, then confirm to filter the carrier chart'}
-                </p>
               </div>
-            </ResizablePanel>
-
-            {deliveryIdKey && (
-              <ResizablePanel
-                id="table"
-                rect={panelLayout.table}
-                title="Deliveries summary"
-                onMove={(dx, dy) => handlePanelMove('table', dx, dy)}
-                onResize={(edge, dx, dy) => handlePanelResize('table', edge, dx, dy)}
-                className="p-4"
-              >
-                <div className="h-full flex flex-col min-h-0 overflow-hidden">
-            <p className="text-sm text-slate-500 dark:text-slate-400 px-4 mb-2 shrink-0">
-              <strong>{deliveriesInTableCount.toLocaleString()}</strong> delivery{deliveriesInTableCount !== 1 ? 's' : ''}. One row per delivery. Metrics will be calculated when formulas are added.
-              {filterByCarriers.length > 0 && (
-                <span className="block text-blue-600 dark:text-blue-400 mt-0.5">
-                  Showing deliveries for carriers: {filterByCarriers.join(', ')}
-                </span>
               )}
-              {(Object.keys(tableColumnFilters).length > 0) && (
-                <button
-                  type="button"
-                  onClick={() => setTableColumnFilters({})}
-                  className="block mt-1 text-slate-500 dark:text-slate-400 underline hover:text-slate-700 dark:hover:text-slate-200"
-                >
-                  Clear all table filters
-                </button>
-              )}
-            </p>
+              {type === 'table' && (
+              <div className="h-full flex flex-col min-h-0 overflow-hidden">
+            {(filterByCarriers.length > 0 || Object.keys(tableColumnFilters).length > 0) && (
+              <p className="text-xs text-slate-500 dark:text-slate-400 px-2 mb-1 shrink-0">
+                {filterByCarriers.length > 0 && (
+                  <span className="text-blue-600 dark:text-blue-400">
+                    Carriers: {filterByCarriers.join(', ')}
+                  </span>
+                )}
+                {Object.keys(tableColumnFilters).length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setTableColumnFilters({})}
+                    className={`${filterByCarriers.length > 0 ? 'ml-1 ' : ''}text-slate-500 dark:text-slate-400 underline hover:text-slate-700 dark:hover:text-slate-200`}
+                  >
+                    Clear all table filters
+                  </button>
+                )}
+              </p>
+            )}
             <div className="flex-1 min-h-0 overflow-auto border-t border-slate-200 dark:border-slate-700">
-              <table className="w-full border-collapse text-sm">
+              <table className="w-full border-collapse text-xs">
                 <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-700/80 shadow-[0_1px_0_0_rgba(0,0,0,0.05)] dark:shadow-[0_1px_0_0_rgba(255,255,255,0.05)]">
                   <tr className="border-b border-slate-200 dark:border-slate-600">
                     {TABLE_COLUMNS.map(({ key, label, align }) => (
                       <th
                         key={key}
-                        className={`font-semibold text-slate-700 dark:text-slate-200 px-4 py-3 whitespace-nowrap ${align === 'right' ? 'text-right' : 'text-left'}`}
+                        className={`font-semibold text-slate-700 dark:text-slate-200 px-2 py-1.5 whitespace-nowrap ${align === 'right' ? 'text-right' : 'text-left'}`}
                       >
                         <button
                           type="button"
@@ -801,12 +897,12 @@ function App() {
                   </tr>
                   <tr className="border-b border-slate-200 dark:border-slate-600 bg-slate-50/70 dark:bg-slate-700/50">
                     {TABLE_COLUMNS.map(({ key, align }) => (
-                      <th key={key} className={`px-4 py-2 ${align === 'right' ? 'text-right' : 'text-left'}`}>
+                      <th key={key} className={`px-2 py-1 ${align === 'right' ? 'text-right' : 'text-left'}`}>
                         <div ref={tableFilterPopup === key ? filterPopupRef : undefined} className="relative inline-block">
                           <button
                             type="button"
                             onClick={() => setTableFilterPopup((prev) => (prev === key ? null : key))}
-                            className={`inline-flex items-center gap-1 px-2 py-1.5 text-sm border rounded bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${tableFilterPopup === key ? 'border-blue-500 ring-2 ring-blue-200 dark:ring-blue-900' : 'border-slate-300 dark:border-slate-600'}`}
+                            className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 text-xs border rounded bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${tableFilterPopup === key ? 'border-blue-500 ring-2 ring-blue-200 dark:ring-blue-900' : 'border-slate-300 dark:border-slate-600'}`}
                             aria-label={`Filter by ${TABLE_COLUMNS.find((c) => c.key === key)?.label ?? key}`}
                             aria-expanded={tableFilterPopup === key}
                           >
@@ -848,31 +944,31 @@ function App() {
                             };
                             return (
                               <div
-                                className="absolute left-0 top-full mt-1 z-20 min-w-[200px] max-h-[280px] overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-lg shadow-lg py-2"
+                                className="absolute left-0 top-full mt-0.5 z-20 min-w-[180px] max-h-[240px] overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded shadow-lg py-1 text-xs"
                                 role="dialog"
                                 aria-label={`Filter values for ${TABLE_COLUMNS.find((c) => c.key === key)?.label}`}
                               >
-                                <div className="flex gap-1 px-2 pb-2 border-b border-slate-100 dark:border-slate-700">
+                                <div className="flex gap-0.5 px-1.5 pb-1 border-b border-slate-100 dark:border-slate-700">
                                   <button
                                     type="button"
                                     onClick={selectAll}
-                                    className="flex-1 px-2 py-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/50 rounded"
+                                    className="flex-1 px-1.5 py-0.5 text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/50 rounded"
                                   >
                                     Select all
                                   </button>
                                   <button
                                     type="button"
                                     onClick={clearAll}
-                                    className="flex-1 px-2 py-1 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded"
+                                    className="flex-1 px-1.5 py-0.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded"
                                   >
                                     Clear all
                                   </button>
                                 </div>
-                                <div className="py-1 max-h-[220px] overflow-auto">
+                                <div className="py-0.5 max-h-[180px] overflow-auto">
                                   {distinct.map((value) => (
                                     <label
                                       key={value}
-                                      className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-sm"
+                                      className="flex items-center gap-1.5 px-2 py-1 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-xs"
                                     >
                                       <input
                                         type="checkbox"
@@ -942,28 +1038,28 @@ function App() {
                         key={row.deliveryId}
                         className="border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50/50 dark:hover:bg-slate-700/50"
                       >
-                        <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">
+                        <td className="px-2 py-1.5 font-medium text-slate-800 dark:text-slate-200">
                           {row.deliveryId}
                         </td>
-                        <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300 tabular-nums">
+                        <td className="px-2 py-1.5 text-right text-slate-600 dark:text-slate-300 tabular-nums">
                           {containerTypeKey && outermostLpnKey
                             ? row.parcels.toLocaleString()
                             : '—'}
                         </td>
-                        <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300 tabular-nums">
+                        <td className="px-2 py-1.5 text-right text-slate-600 dark:text-slate-300 tabular-nums">
                           {containerTypeKey && outermostLpnKey
                             ? row.pallets.toLocaleString()
                             : '—'}
                         </td>
-                        <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300 tabular-nums">
+                        <td className="px-2 py-1.5 text-right text-slate-600 dark:text-slate-300 tabular-nums">
                           {dispatchedTimestampKey
                             ? (row.dispatchToPickingMs != null ? formatDurationMs(row.dispatchToPickingMs) : '—')
                             : '—'}
                         </td>
-                        <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300 tabular-nums">
+                        <td className="px-2 py-1.5 text-right text-slate-600 dark:text-slate-300 tabular-nums">
                           —
                         </td>
-                        <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300 tabular-nums">
+                        <td className="px-2 py-1.5 text-right text-slate-600 dark:text-slate-300 tabular-nums">
                           —
                         </td>
                       </tr>
@@ -973,8 +1069,11 @@ function App() {
               </table>
             </div>
                 </div>
-              </ResizablePanel>
-            )}
+              )}
+            </ResizablePanel>
+              );
+            })}
+          </div>
           </div>
         )}
         {!loading && rows.length === 0 && !error && (

@@ -13,13 +13,14 @@ interface ResizablePanelProps {
   title: string;
   onMove: (dx: number, dy: number) => void;
   onResize: (edge: 'e' | 's' | 'se', dx: number, dy: number) => void;
+  onMinimize?: () => void;
   children: React.ReactNode;
   className?: string;
 }
 
 const RESIZE_HANDLE_SIZE = 8;
 
-export function ResizablePanel({ id, rect, title, onMove, onResize, children, className = '' }: ResizablePanelProps) {
+export function ResizablePanel({ id, rect, title, onMove, onResize, onMinimize, children, className = '' }: ResizablePanelProps) {
   const [dragging, setDragging] = useState(false);
   const [resizing, setResizing] = useState<'e' | 's' | 'se' | null>(null);
   const lastPointer = useRef({ x: 0, y: 0 });
@@ -70,7 +71,7 @@ export function ResizablePanel({ id, rect, title, onMove, onResize, children, cl
     <div
       ref={panelRef}
       id={id}
-      className={`absolute flex flex-col rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm bg-white dark:bg-slate-800 overflow-hidden ${className}`}
+      className={`absolute flex flex-col rounded border border-slate-200 dark:border-slate-700 shadow-sm bg-white dark:bg-slate-800 overflow-hidden ${className}`}
       style={{
         left: `${rect.x}%`,
         top: `${rect.y}%`,
@@ -90,10 +91,22 @@ export function ResizablePanel({ id, rect, title, onMove, onResize, children, cl
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') e.currentTarget.click();
         }}
-        className="flex items-center justify-between shrink-0 px-3 py-2 cursor-grab active:cursor-grabbing bg-slate-100 dark:bg-slate-700/80 border-b border-slate-200 dark:border-slate-600 select-none touch-none"
+        className="flex items-center justify-between shrink-0 px-2 py-1 cursor-grab active:cursor-grabbing bg-slate-100 dark:bg-slate-700/80 border-b border-slate-200 dark:border-slate-600 select-none touch-none"
         aria-label={`Move panel: ${title}`}
       >
-        <span className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">{title}</span>
+        <span className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">{title}</span>
+        {onMinimize && (
+          <button
+            type="button"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); onMinimize(); }}
+            className="shrink-0 p-1 rounded text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+            aria-label="Minimize panel"
+            title="Minimize to sidebar"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" /></svg>
+          </button>
+        )}
       </div>
       <div className="flex-1 min-h-0 overflow-hidden flex flex-col">{children}</div>
 
