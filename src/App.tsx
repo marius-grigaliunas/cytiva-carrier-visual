@@ -6,7 +6,7 @@ import {
   linesByStep,
   type ReportRow,
 } from './utils/loadReport';
-import { countParcelsForDelivery, countPalletsForDelivery, formatDurationMs, maxDispatchToPickingMsForDelivery } from './utils/tableHeaderFormulas';
+import { countParcelsForDelivery, countPalletsForDelivery, maxDispatchToPickingMsForDelivery } from './utils/tableHeaderFormulas';
 import { getCarrierOrder, getCarrierFromShipMethod } from './utils/carriers.ts';
 import * as XLSX from 'xlsx';
 
@@ -14,6 +14,9 @@ import type { TruckScheduleItem } from './types/schedule';
 import { TruckScheduleStrip } from './components/TruckScheduleStrip';
 import { CarrierGrid } from './components/CarrierGrid';
 import { AlertPanel } from './components/AlertPanel';
+import { DeliveriesPerCarrier } from './components/DeliveriesPerCarrier';
+import { LinesPerStep } from './components/LinesPerStep';
+import { DeliveriesSummary, type TableRow, type TableColumnKey } from './components/DeliveriesSummary';
 import { computeCarrierStats } from './utils/carrierStats';
 import { computeAlerts } from './utils/alerts';
 
@@ -22,42 +25,6 @@ import { ResizablePanel, clampRectToBounds, clampRectNoOverlap, type PanelRect }
 
 const base = (import.meta.env.BASE_URL ?? '/').replace(/\/?$/, '/')
 const DEFAULT_REPORT_URL = `${base}data/report.xlsx`
-
-type TableColumnKey = 'delivery' | 'parcels' | 'pallets' | 'dispatchToPicking' | 'pickingToPacking' | 'packingToFirmContents';
-
-interface TableRow {
-  deliveryId: string;
-  parcels: number;
-  pallets: number;
-  dispatchToPickingMs: number | null;
-}
-
-function getCellValue(row: TableRow, key: TableColumnKey, formatDurationMs: (ms: number) => string): string {
-  switch (key) {
-    case 'delivery':
-      return row.deliveryId;
-    case 'parcels':
-      return String(row.parcels);
-    case 'pallets':
-      return String(row.pallets);
-    case 'dispatchToPicking':
-      return row.dispatchToPickingMs != null ? formatDurationMs(row.dispatchToPickingMs) : '—';
-    case 'pickingToPacking':
-    case 'packingToFirmContents':
-      return '—';
-    default:
-      return '';
-  }
-}
-
-const TABLE_COLUMNS: { key: TableColumnKey; label: string; align: 'left' | 'right' }[] = [
-  { key: 'delivery', label: 'Delivery', align: 'left' },
-  { key: 'parcels', label: 'Number of parcels', align: 'right' },
-  { key: 'pallets', label: 'Number of pallets', align: 'right' },
-  { key: 'dispatchToPicking', label: 'Dispatch to picking', align: 'right' },
-  { key: 'pickingToPacking', label: 'Picking to packing', align: 'right' },
-  { key: 'packingToFirmContents', label: 'Packing to firm contents', align: 'right' },
-];
 
 function App() {
   const [loading, setLoading] = useState(false);
@@ -398,7 +365,7 @@ function App() {
       setDropOffTimestampKey(dotsKey ?? '');
       setPanelLayout(getInitialPanelLayout());
       setPanelOrder(['carrier', 'step', 'table', 'truckSchedule', 'carrierGrid', 'alertPanel']);
-      setPanelVisible({ carrier: true, step: true, table: true, truckSchedule: true, carrierGrid: true, alertPanel: true });
+      setPanelVisible({ carrier: true, step: false, table: false, truckSchedule: true, carrierGrid: true, alertPanel: false });
       setPanelTypes({ carrier: 'carrier', step: 'step', table: 'table', truckSchedule: 'truckSchedule', carrierGrid: 'carrierGrid', alertPanel: 'alertPanel' });
       setTrucks(getInitialTrucks());
     } catch (e) {
@@ -479,9 +446,9 @@ function App() {
           setDropOffTimestampKey(dropOffTimestampKey);
           setPanelLayout(getInitialPanelLayout());
           setPanelOrder(['carrier', 'step', 'table', 'truckSchedule', 'carrierGrid', 'alertPanel']);
-          setPanelVisible({ carrier: true, step: true, table: true, truckSchedule: true, carrierGrid: true, alertPanel: true });
-          setPanelTypes({ carrier: 'carrier', step: 'step', table: 'table', truckSchedule: 'truckSchedule', carrierGrid: 'carrierGrid', alertPanel: 'alertPanel' });
-          setTrucks(getInitialTrucks());
+setPanelVisible({ carrier: true, step: false, table: false, truckSchedule: true, carrierGrid: true, alertPanel: false });
+        setPanelTypes({ carrier: 'carrier', step: 'step', table: 'table', truckSchedule: 'truckSchedule', carrierGrid: 'carrierGrid', alertPanel: 'alertPanel' });
+        setTrucks(getInitialTrucks());
         } catch (err) {
           setError(err instanceof Error ? err.message : 'Failed to parse file');
           setRows([]);
@@ -837,164 +804,29 @@ function App() {
               className="p-2"
             >
               {type === 'carrier' && (
-              <div
-                className="h-full flex flex-col min-h-0 overflow-hidden"
-                onClick={inCarrierSelectionMode ? confirmCarrierSelection : undefined}
-              >
-                {inCarrierSelectionMode && (
-                  <div className="flex items-center gap-1 rounded border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 px-1.5 py-0.5 shadow-sm mb-1 shrink-0">
-                    <span className="text-xs text-slate-500 dark:text-slate-400 mr-1">Confirm or cancel:</span>
-                    <button
-                      type="button"
-                      aria-label="Cancel selection"
-                      onClick={(e) => { e.stopPropagation(); cancelCarrierSelection(); }}
-                      className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-red-100 dark:hover:bg-red-900/50 hover:text-red-700 dark:hover:text-red-300"
-                      title="Cancel selection"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Confirm selection"
-                      onClick={(e) => { e.stopPropagation(); confirmCarrierSelection(); }}
-                      disabled={pendingCarriers.size === 0}
-                      className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 hover:text-emerald-700 dark:hover:text-emerald-300 disabled:opacity-50 disabled:pointer-events-none"
-                      title="Confirm selection"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                    </button>
-                  </div>
-                )}
-                {(filterBySteps.length > 0 || inCarrierSelectionMode) && (
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-1 shrink-0">
-                    {filterBySteps.length > 0 && (
-                      <span className="text-emerald-600 dark:text-emerald-400">
-                        Steps: {filterBySteps.join(', ')}
-                      </span>
-                    )}
-                    {inCarrierSelectionMode && (
-                      <span className={filterBySteps.length > 0 ? ' ml-2' : ''}>
-                        {pendingCarriers.size > 0
-                          ? `Selected: ${Array.from(pendingCarriers).join(', ')} — ✓ confirm, X cancel`
-                          : 'Click carriers, then ✓ to filter'}
-                      </span>
-                    )}
-                  </p>
-                )}
-                <div
-                  className="flex-1 min-h-0 overflow-auto space-y-1"
-                  style={{ minHeight: 0 }}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {carrierBarsToShow.map(({ carrier, count }) => (
-                    <button
-                      type="button"
-                      key={carrier}
-                      onClick={() => toggleCarrierPending(carrier)}
-                      className={`w-full flex items-center gap-1 text-left rounded p-0.5 -m-0.5 transition-colors ${
-                        pendingCarriers.has(carrier) ? 'ring-2 ring-blue-500 ring-offset-1 dark:ring-offset-slate-800 bg-blue-50 dark:bg-blue-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'
-                      }`}
-                    >
-                      <div className="w-24 shrink-0 text-xs font-medium text-slate-700 dark:text-slate-300 truncate" title={carrier}>
-                        {carrier}
-                      </div>
-                      <div className="flex-1 flex items-center gap-1 min-w-0">
-                        <div className="flex-1 h-5 bg-slate-100 dark:bg-slate-700 rounded-sm overflow-hidden min-w-0">
-                          <div
-                            className="h-full bg-blue-500 rounded-sm min-w-[2px] transition-all duration-300"
-                            style={{ width: `${(count / maxCarrierDisplay) * 100}%` }}
-                          />
-                        </div>
-                        <span className="w-12 shrink-0 text-right text-xs tabular-nums text-slate-600 dark:text-slate-300 font-medium">
-                          {count.toLocaleString()}
-                        </span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
+                <DeliveriesPerCarrier
+                  bars={carrierBarsToShow}
+                  maxCount={maxCarrierDisplay}
+                  pendingCarriers={pendingCarriers}
+                  inSelectionMode={inCarrierSelectionMode}
+                  filterBySteps={filterBySteps}
+                  onToggleCarrier={toggleCarrierPending}
+                  onConfirmSelection={confirmCarrierSelection}
+                  onCancelSelection={cancelCarrierSelection}
+                />
               )}
               {type === 'step' && (
-              <div
-                className="h-full flex flex-col min-h-0 overflow-hidden"
-                onClick={inStepSelectionMode ? confirmStepSelection : undefined}
-              >
-              {inStepSelectionMode && (
-                <div className="absolute top-2 right-2 flex items-center gap-1 rounded border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 px-1.5 py-0.5 shadow-sm">
-                  <span className="text-xs text-slate-500 dark:text-slate-400 mr-1">Confirm or cancel:</span>
-                  <button
-                    type="button"
-                    aria-label="Cancel selection"
-                    onClick={(e) => { e.stopPropagation(); cancelStepSelection(); }}
-                    className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-red-100 dark:hover:bg-red-900/50 hover:text-red-700 dark:hover:text-red-300"
-                    title="Cancel selection"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Confirm selection"
-                    onClick={(e) => { e.stopPropagation(); confirmStepSelection(); }}
-                    disabled={pendingSteps.size === 0}
-                    className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 hover:text-emerald-700 dark:hover:text-emerald-300 disabled:opacity-50 disabled:pointer-events-none"
-                    title="Confirm selection"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                  </button>
-                </div>
-                )}
-                {(filterByCarriers.length > 0 || inStepSelectionMode) && (
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-1 shrink-0">
-                    {filterByCarriers.length > 0 && (
-                      <span className="text-blue-600 dark:text-blue-400">
-                        Carriers: {filterByCarriers.join(', ')}
-                      </span>
-                    )}
-                    {inStepSelectionMode && (
-                      <span className={filterByCarriers.length > 0 ? ' ml-2' : ''}>
-                        {pendingSteps.size > 0
-                          ? `Selected: ${Array.from(pendingSteps).join(', ')} — ✓ confirm, X cancel`
-                          : 'Click steps, then ✓ to filter'}
-                      </span>
-                    )}
-                  </p>
-                )}
-              {stepKey ? (
-                <div
-                  className="flex-1 min-h-0 overflow-auto space-y-1"
-                  style={{ minHeight: 0 }}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {stepBarsToShow.map(({ step, count }) => (
-                    <button
-                      type="button"
-                      key={step}
-                      onClick={() => toggleStepPending(step)}
-                      className={`w-full flex items-center gap-1 text-left rounded p-0.5 -m-0.5 transition-colors ${
-                        pendingSteps.has(step) ? 'ring-2 ring-emerald-500 ring-offset-1 dark:ring-offset-slate-800 bg-emerald-50 dark:bg-emerald-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'
-                      }`}
-                    >
-                      <div className="w-28 shrink-0 text-xs font-medium text-slate-700 dark:text-slate-300 truncate" title={step}>
-                        {step}
-                      </div>
-                      <div className="flex-1 flex items-center gap-1 min-w-0">
-                        <div className="flex-1 h-5 bg-slate-100 dark:bg-slate-700 rounded-sm overflow-hidden min-w-0">
-                          <div
-                            className="h-full bg-emerald-500 rounded-sm min-w-[2px] transition-all duration-300"
-                            style={{ width: `${(count / maxStepDisplay) * 100}%` }}
-                          />
-                        </div>
-                        <span className="w-12 shrink-0 text-right text-xs tabular-nums text-slate-600 dark:text-slate-300 font-medium">
-                          {count.toLocaleString()}
-                        </span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-slate-500 dark:text-slate-400 text-xs">No “Next Outbound Step” column found in this report.</p>
-              )}
-              </div>
+                <LinesPerStep
+                  bars={stepBarsToShow}
+                  maxCount={maxStepDisplay}
+                  pendingSteps={pendingSteps}
+                  inSelectionMode={inStepSelectionMode}
+                  filterByCarriers={filterByCarriers}
+                  stepKey={stepKey}
+                  onToggleStep={toggleStepPending}
+                  onConfirmSelection={confirmStepSelection}
+                  onCancelSelection={cancelStepSelection}
+                />
               )}
               {type === 'truckSchedule' && (
                 <div className="h-full min-h-0 overflow-auto flex flex-col">
@@ -1017,223 +849,20 @@ function App() {
                 </div>
               )}
               {type === 'table' && (
-              <div className="h-full flex flex-col min-h-0 overflow-hidden">
-            {(filterByCarriers.length > 0 || Object.keys(tableColumnFilters).length > 0) && (
-              <p className="text-xs text-slate-500 dark:text-slate-400 px-2 mb-1 shrink-0">
-                {filterByCarriers.length > 0 && (
-                  <span className="text-blue-600 dark:text-blue-400">
-                    Carriers: {filterByCarriers.join(', ')}
-                  </span>
-                )}
-                {Object.keys(tableColumnFilters).length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setTableColumnFilters({})}
-                    className={`${filterByCarriers.length > 0 ? 'ml-1 ' : ''}text-slate-500 dark:text-slate-400 underline hover:text-slate-700 dark:hover:text-slate-200`}
-                  >
-                    Clear all table filters
-                  </button>
-                )}
-              </p>
-            )}
-            <div className="flex-1 min-h-0 overflow-auto border-t border-slate-200 dark:border-slate-700">
-              <table className="w-full border-collapse text-xs">
-                <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-700/80 shadow-[0_1px_0_0_rgba(0,0,0,0.05)] dark:shadow-[0_1px_0_0_rgba(255,255,255,0.05)]">
-                  <tr className="border-b border-slate-200 dark:border-slate-600">
-                    {TABLE_COLUMNS.map(({ key, label, align }) => (
-                      <th
-                        key={key}
-                        className={`font-semibold text-slate-700 dark:text-slate-200 px-2 py-1.5 whitespace-nowrap ${align === 'right' ? 'text-right' : 'text-left'}`}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => handleTableSort(key)}
-                          className={`inline-flex items-center gap-1 hover:text-slate-900 dark:hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:focus:ring-offset-slate-800 rounded ${align === 'right' ? 'justify-end w-full' : ''} ${tableSort?.key === key ? 'text-blue-600 dark:text-blue-400' : ''}`}
-                        >
-                          {label}
-                          {tableSort?.key === key && (
-                            <span className="text-blue-600 dark:text-blue-400" aria-hidden>
-                              {tableSort?.dir === 'asc' ? '↑' : '↓'}
-                            </span>
-                          )}
-                        </button>
-                      </th>
-                    ))}
-                  </tr>
-                  <tr className="border-b border-slate-200 dark:border-slate-600 bg-slate-50/70 dark:bg-slate-700/50">
-                    {TABLE_COLUMNS.map(({ key, align }) => (
-                      <th key={key} className={`px-2 py-1 ${align === 'right' ? 'text-right' : 'text-left'}`}>
-                        <div ref={tableFilterPopup === key ? filterPopupRef : undefined} className="relative inline-block">
-                          <button
-                            type="button"
-                            onClick={() => setTableFilterPopup((prev) => (prev === key ? null : key))}
-                            className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 text-xs border rounded bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${tableFilterPopup === key ? 'border-blue-500 ring-2 ring-blue-200 dark:ring-blue-900' : 'border-slate-300 dark:border-slate-600'}`}
-                            aria-label={`Filter by ${TABLE_COLUMNS.find((c) => c.key === key)?.label ?? key}`}
-                            aria-expanded={tableFilterPopup === key}
-                          >
-                            Filter
-                            {tableColumnFilters[key] !== undefined && (
-                              <span className="text-blue-600 dark:text-blue-400 font-medium" aria-hidden>
-                                ({tableColumnFilters[key]?.size ?? 0})
-                              </span>
-                            )}
-                          </button>
-                          {tableFilterPopup === key && (() => {
-                            const distinct = [...new Set(unfilteredTableRows.map((r) => getCellValue(r, key, formatDurationMs)))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-                            const allowed = tableColumnFilters[key];
-                            const toggleValue = (v: string) => {
-                              setTableColumnFilters((prev) => {
-                                const next = { ...prev };
-                                const current = next[key] ?? new Set(distinct);
-                                const nextSet = new Set(current);
-                                if (nextSet.has(v)) nextSet.delete(v);
-                                else nextSet.add(v);
-                                if (nextSet.size === 0) next[key] = new Set();
-                                else if (nextSet.size === distinct.length) {
-                                  delete next[key];
-                                } else {
-                                  next[key] = nextSet;
-                                }
-                                return next;
-                              });
-                            };
-                            const selectAll = () => {
-                              setTableColumnFilters((prev) => {
-                                const next = { ...prev };
-                                delete next[key];
-                                return next;
-                              });
-                            };
-                            const clearAll = () => {
-                              setTableColumnFilters((prev) => ({ ...prev, [key]: new Set() }));
-                            };
-                            return (
-                              <div
-                                className="absolute left-0 top-full mt-0.5 z-20 min-w-[180px] max-h-[240px] overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded shadow-lg py-1 text-xs"
-                                role="dialog"
-                                aria-label={`Filter values for ${TABLE_COLUMNS.find((c) => c.key === key)?.label}`}
-                              >
-                                <div className="flex gap-0.5 px-1.5 pb-1 border-b border-slate-100 dark:border-slate-700">
-                                  <button
-                                    type="button"
-                                    onClick={selectAll}
-                                    className="flex-1 px-1.5 py-0.5 text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/50 rounded"
-                                  >
-                                    Select all
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={clearAll}
-                                    className="flex-1 px-1.5 py-0.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded"
-                                  >
-                                    Clear all
-                                  </button>
-                                </div>
-                                <div className="py-0.5 max-h-[180px] overflow-auto">
-                                  {distinct.map((value) => (
-                                    <label
-                                      key={value}
-                                      className="flex items-center gap-1.5 px-2 py-1 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-xs"
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        checked={allowed === undefined ? true : allowed.has(value)}
-                                        onChange={() => toggleValue(value)}
-                                        className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
-                                      />
-                                      <span className="truncate" title={value}>
-                                        {value || '(blank)'}
-                                      </span>
-                                    </label>
-                                  ))}
-                                </div>
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {(() => {
-                    let filtered: TableRow[] = unfilteredTableRows.filter((row) => {
-                      for (const { key } of TABLE_COLUMNS) {
-                        const allowed = tableColumnFilters[key];
-                        if (allowed !== undefined) {
-                          if (allowed.size === 0) return false;
-                          const v = getCellValue(row, key, formatDurationMs);
-                          if (!allowed.has(v)) return false;
-                        }
-                      }
-                      return true;
-                    });
-                    const sortKey = tableSort?.key ?? 'delivery';
-                    const dir = tableSort?.dir ?? 'asc';
-                    const mult = dir === 'asc' ? 1 : -1;
-                    filtered = [...filtered].sort((a, b) => {
-                      let cmp = 0;
-                      switch (sortKey) {
-                        case 'delivery':
-                          cmp = a.deliveryId.localeCompare(b.deliveryId, undefined, { numeric: true });
-                          break;
-                        case 'parcels':
-                          cmp = a.parcels - b.parcels;
-                          break;
-                        case 'pallets':
-                          cmp = a.pallets - b.pallets;
-                          break;
-                        case 'dispatchToPicking': {
-                          const va = a.dispatchToPickingMs ?? -1;
-                          const vb = b.dispatchToPickingMs ?? -1;
-                          cmp = va - vb;
-                          break;
-                        }
-                        case 'pickingToPacking':
-                        case 'packingToFirmContents':
-                          cmp = 0;
-                          break;
-                        default:
-                          cmp = a.deliveryId.localeCompare(b.deliveryId, undefined, { numeric: true });
-                      }
-                      return cmp * mult;
-                    });
-                    return filtered.map((row) => (
-                      <tr
-                        key={row.deliveryId}
-                        className="border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50/50 dark:hover:bg-slate-700/50"
-                      >
-                        <td className="px-2 py-1.5 font-medium text-slate-800 dark:text-slate-200">
-                          {row.deliveryId}
-                        </td>
-                        <td className="px-2 py-1.5 text-right text-slate-600 dark:text-slate-300 tabular-nums">
-                          {containerTypeKey && outermostLpnKey
-                            ? row.parcels.toLocaleString()
-                            : '—'}
-                        </td>
-                        <td className="px-2 py-1.5 text-right text-slate-600 dark:text-slate-300 tabular-nums">
-                          {containerTypeKey && outermostLpnKey
-                            ? row.pallets.toLocaleString()
-                            : '—'}
-                        </td>
-                        <td className="px-2 py-1.5 text-right text-slate-600 dark:text-slate-300 tabular-nums">
-                          {dispatchedTimestampKey
-                            ? (row.dispatchToPickingMs != null ? formatDurationMs(row.dispatchToPickingMs) : '—')
-                            : '—'}
-                        </td>
-                        <td className="px-2 py-1.5 text-right text-slate-600 dark:text-slate-300 tabular-nums">
-                          —
-                        </td>
-                        <td className="px-2 py-1.5 text-right text-slate-600 dark:text-slate-300 tabular-nums">
-                          —
-                        </td>
-                      </tr>
-                    ));
-                  })()}
-                </tbody>
-              </table>
-            </div>
-                </div>
+                <DeliveriesSummary
+                  rows={unfilteredTableRows}
+                  columnFilters={tableColumnFilters}
+                  onColumnFiltersChange={setTableColumnFilters}
+                  filterPopup={tableFilterPopup}
+                  onFilterPopupChange={setTableFilterPopup}
+                  filterPopupRef={filterPopupRef}
+                  sort={tableSort}
+                  onSort={handleTableSort}
+                  filterByCarriers={filterByCarriers}
+                  containerTypeKey={containerTypeKey}
+                  outermostLpnKey={outermostLpnKey}
+                  dispatchedTimestampKey={dispatchedTimestampKey}
+                />
               )}
             </ResizablePanel>
               );
