@@ -766,53 +766,6 @@ setPanelVisible({ carrier: true, step: false, table: false, truckSchedule: true,
                     </>
                   ) : null}
                   <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-600">
-                    <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Add panel</div>
-                    <div className="flex flex-col gap-1">
-                      <button
-                        type="button"
-                        onClick={() => addPanel('truckSchedule')}
-                        className="text-left px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-sm text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-600"
-                      >
-                        + Truck schedule
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => addPanel('carrierGrid')}
-                        className="text-left px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-sm text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-600"
-                      >
-                        + Carrier grid
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => addPanel('alertPanel')}
-                        className="text-left px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-sm text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-600"
-                      >
-                        + Alerts
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => addPanel('carrier')}
-                        className="text-left px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-sm text-blue-800 dark:text-blue-200 border border-blue-200 dark:border-blue-800"
-                      >
-                        + Deliveries per carrier
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => addPanel('step')}
-                        className="text-left px-3 py-2 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-sm text-emerald-800 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800"
-                      >
-                        + Lines per step
-                      </button>
-                      {deliveryIdKey && (
-                        <button
-                          type="button"
-                          onClick={() => addPanel('table')}
-                          className="text-left px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-sm text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-600"
-                        >
-                          + Deliveries summary
-                        </button>
-                      )}
-                    </div>
                   </div>
                 </div>
               )}
