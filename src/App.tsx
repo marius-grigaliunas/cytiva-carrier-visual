@@ -684,7 +684,7 @@ setPanelVisible({ carrier: true, step: false, table: false, truckSchedule: true,
             {/* Sidebar: minimized panels + add panel */}
             <aside
               className={`shrink-0 flex flex-col bg-slate-100 dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 transition-[width] duration-200 overflow-hidden ${
-                sidebarOpen ? 'w-52' : 'w-0'
+                sidebarOpen ? 'w-56' : 'w-0'
               }`}
             >
               <div className="flex items-center justify-between px-2 py-2 border-b border-slate-200 dark:border-slate-700">
@@ -730,7 +730,7 @@ setPanelVisible({ carrier: true, step: false, table: false, truckSchedule: true,
                                   handleCutoffChange(carrier, d.getTime());
                                 }
                               }}
-                              className="text-xs w-16 px-1 py-0.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shrink-0"
+                              className="text-xs w-20 px-1 py-0.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shrink-0"
                             />
                           </div>
                         );
