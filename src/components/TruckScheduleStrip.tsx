@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { TruckScheduleItem } from '../types/schedule';
 import { TRUCK_CARRIER_TO_DISPLAY, formatTruckDisplayLabel } from '../utils/truckSchedule';
+import { useTruckDepartureStore } from '../stores/truckDepartureStore';
 
 const COUNTDOWN_UPDATE_MS = 1000;
 
@@ -50,6 +51,7 @@ const URGENCY_CLASSES: Record<ReturnType<typeof urgencyLevel>, string> = {
 };
 
 const CARRIER_KEYS = Object.keys(TRUCK_CARRIER_TO_DISPLAY);
+const OTHER_OPTION_VALUE = '__OTHER__';
 
 export interface AddTruckData {
   name: string;
@@ -75,9 +77,15 @@ export function TruckScheduleStrip({
   onAddTruck,
   className = '',
 }: TruckScheduleStripProps) {
+  const statusById = useTruckDepartureStore((s) => s.statusById);
+  const markDeparted = useTruckDepartureStore((s) => s.markDeparted);
+  const markPresent = useTruckDepartureStore((s) => s.markPresent);
+
   const [now, setNow] = useState(() => Date.now());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [carrierOption, setCarrierOption] = useState<string>(() => CARRIER_KEYS[0] ?? 'GEODIS');
+  const [otherCarrierInput, setOtherCarrierInput] = useState<string>('');
   const [addForm, setAddForm] = useState<AddTruckData>(() => {
     const maxNum = trucks.reduce((acc, t) => {
       const m = t.label.match(/Truck\s*(\d+)/i);
@@ -100,6 +108,7 @@ export function TruckScheduleStrip({
       }, 0);
       const d = new Date();
       d.setMinutes(d.getMinutes() + 60);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setAddForm((prev) => ({
         ...prev,
         name: `Truck ${maxNum + 1}`,
@@ -145,19 +154,21 @@ export function TruckScheduleStrip({
       onTrucksChange(
         trucks.map((t) => (t.id === id ? { ...t, departureMs: ms } : t))
       );
-      setEditingId(null);
     },
     [trucks, onTrucksChange]
   );
 
   const handleSubmitAdd = useCallback(() => {
     if (!onAddTruck) return;
-    onAddTruck(addForm);
+    const carrier =
+      carrierOption === OTHER_OPTION_VALUE ? (otherCarrierInput.trim() || 'Other') : carrierOption;
+    onAddTruck({ ...addForm, carrier });
     setShowAddForm(false);
-  }, [onAddTruck, addForm]);
+  }, [onAddTruck, addForm, carrierOption, otherCarrierInput]);
 
-  const visibleTrucks = trucks.filter((t) => !t.cancelled);
+  const visibleTrucks = trucks.filter((t) => !t.cancelled && (statusById[t.id] ?? 'present') !== 'departed');
   const cancelledTrucks = trucks.filter((t) => t.cancelled);
+  const departedTrucks = trucks.filter((t) => !t.cancelled && (statusById[t.id] ?? 'present') === 'departed');
 
   return (
     <div
@@ -193,8 +204,17 @@ export function TruckScheduleStrip({
             className="text-xs w-24 px-2 py-1 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
           />
           <select
-            value={addForm.carrier}
-            onChange={(e) => setAddForm((f) => ({ ...f, carrier: e.target.value }))}
+            value={carrierOption}
+            onChange={(e) => {
+              const v = e.target.value;
+              setCarrierOption(v);
+              if (v === OTHER_OPTION_VALUE) {
+                setAddForm((f) => ({ ...f, carrier: otherCarrierInput.trim() || 'Other' }));
+                return;
+              }
+              setOtherCarrierInput('');
+              setAddForm((f) => ({ ...f, carrier: v }));
+            }}
             className="text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
           >
             {CARRIER_KEYS.map((key) => (
@@ -202,7 +222,21 @@ export function TruckScheduleStrip({
                 {TRUCK_CARRIER_TO_DISPLAY[key]}
               </option>
             ))}
+            <option value={OTHER_OPTION_VALUE}>Other...</option>
           </select>
+          {carrierOption === OTHER_OPTION_VALUE && (
+            <input
+              type="text"
+              placeholder="Carrier name (e.g. Logistics Co)"
+              value={otherCarrierInput}
+              onChange={(e) => {
+                const v = e.target.value;
+                setOtherCarrierInput(v);
+                setAddForm((f) => ({ ...f, carrier: v.trim() || 'Other' }));
+              }}
+              className="text-xs w-40 px-2 py-1 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
+            />
+          )}
           <button
             type="button"
             onClick={handleSubmitAdd}
@@ -217,30 +251,74 @@ export function TruckScheduleStrip({
           const msUntil = truck.departureMs - now;
           const urgency = urgencyLevel(msUntil);
           const isEditing = editingId === truck.id;
+          const isDeparted = (statusById[truck.id] ?? 'present') === 'departed';
           return (
             <div
               key={truck.id}
               className={`inline-flex items-center gap-2 rounded border px-2 py-1.5 text-xs transition-colors ${URGENCY_CLASSES[urgency]}`}
             >
-              <span className="font-medium text-slate-800 dark:text-slate-200">
-                {formatTruckDisplayLabel(
-                  TRUCK_CARRIER_TO_DISPLAY[truck.carrier] ?? truck.carrier,
-                  truck.label,
-                  truck.departureMs
+              <span
+                className="font-medium text-slate-800 dark:text-slate-200 cursor-pointer"
+                onClick={() => {
+                  if (!isEditing) setEditingId(truck.id);
+                }}
+                role="button"
+                aria-label="Edit truck"
+              >
+                {!isEditing ? (
+                  formatTruckDisplayLabel(
+                    TRUCK_CARRIER_TO_DISPLAY[truck.carrier] ?? truck.carrier,
+                    truck.label,
+                    truck.departureMs
+                  )
+                ) : (
+                  <span className="inline-flex items-center gap-1">
+                    <input
+                      type="text"
+                      value={truck.label}
+                      onChange={(e) =>
+                        onTrucksChange(trucks.map((t) => (t.id === truck.id ? { ...t, label: e.target.value } : t)))
+                      }
+                      className="w-20 text-xs px-1 py-0.5 rounded border border-slate-300 dark:border-slate-500 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
+                      aria-label="Truck name"
+                    />
+                    <input
+                      type="text"
+                      value={truck.carrier}
+                      onChange={(e) =>
+                        onTrucksChange(trucks.map((t) => (t.id === truck.id ? { ...t, carrier: e.target.value } : t)))
+                      }
+                      className="w-24 text-xs px-1 py-0.5 rounded border border-slate-300 dark:border-slate-500 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
+                      aria-label="Carrier"
+                    />
+                  </span>
                 )}
               </span>
               {isEditing ? (
-                <input
-                  type="datetime-local"
-                  defaultValue={msToDatetimeLocal(truck.departureMs)}
-                  onBlur={(e) => handleDepartureChange(truck.id, e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleDepartureChange(truck.id, (e.target as HTMLInputElement).value);
-                    if (e.key === 'Escape') setEditingId(null);
-                  }}
-                  autoFocus
-                  className="rounded border border-slate-300 dark:border-slate-500 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 px-1 py-0.5"
-                />
+                <span className="inline-flex items-center gap-1">
+                  <input
+                    type="datetime-local"
+                    defaultValue={msToDatetimeLocal(truck.departureMs)}
+                    onBlur={(e) => handleDepartureChange(truck.id, e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        handleDepartureChange(truck.id, (e.target as HTMLInputElement).value);
+                        setEditingId(null);
+                      }
+                      if (e.key === 'Escape') setEditingId(null);
+                    }}
+                    autoFocus
+                    className="rounded border border-slate-300 dark:border-slate-500 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 px-1 py-0.5"
+                    aria-label="Departure time"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setEditingId(null)}
+                    className="text-xs font-medium px-2 py-1 rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-100"
+                  >
+                    Done
+                  </button>
+                </span>
               ) : (
                 <>
                   <span
@@ -254,6 +332,20 @@ export function TruckScheduleStrip({
                   >
                     {formatCountdown(msUntil)}
                   </span>
+                  {!isDeparted && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingId(null);
+                        markDeparted(truck.id);
+                      }}
+                      className="inline-flex items-center justify-center w-5 h-5 rounded border border-emerald-500 dark:border-emerald-400 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 text-xs font-bold"
+                      title="Mark as departed"
+                      aria-label="Mark as departed"
+                    >
+                      ✓
+                    </button>
+                  )}
                   <button
                 type="button"
                 aria-label={`Cancel ${formatTruckDisplayLabel(TRUCK_CARRIER_TO_DISPLAY[truck.carrier] ?? truck.carrier, truck.label, truck.departureMs)}`}
@@ -291,6 +383,98 @@ export function TruckScheduleStrip({
                   >
                     Restore
                   </button>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+        {departedTrucks.length > 0 && (
+          <details className="inline-block">
+            <summary className="text-xs text-slate-500 dark:text-slate-400 cursor-pointer list-none">
+              Departed ({departedTrucks.length})
+            </summary>
+            <div className="flex flex-wrap gap-1 mt-1">
+              {departedTrucks.map((truck) => (
+                <div
+                  key={truck.id}
+                  className={`inline-flex items-center gap-2 rounded border px-2 py-1.5 text-xs transition-colors ${URGENCY_CLASSES.departed} opacity-90`}
+                >
+                  <span
+                    className="font-medium text-slate-600 dark:text-slate-300 line-through cursor-pointer"
+                    onClick={() => setEditingId(truck.id)}
+                    title="Click to edit truck"
+                  >
+                    {editingId === truck.id ? (
+                      <span className="inline-flex items-center gap-1 line-through">
+                        <input
+                          type="text"
+                          value={truck.label}
+                          onChange={(e) =>
+                            onTrucksChange(
+                              trucks.map((t) => (t.id === truck.id ? { ...t, label: e.target.value } : t))
+                            )
+                          }
+                          className="w-20 text-xs px-1 py-0.5 rounded border border-slate-300 dark:border-slate-500 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
+                          aria-label="Truck name"
+                        />
+                        <input
+                          type="text"
+                          value={truck.carrier}
+                          onChange={(e) =>
+                            onTrucksChange(
+                              trucks.map((t) => (t.id === truck.id ? { ...t, carrier: e.target.value } : t))
+                            )
+                          }
+                          className="w-24 text-xs px-1 py-0.5 rounded border border-slate-300 dark:border-slate-500 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
+                          aria-label="Carrier"
+                        />
+                      </span>
+                    ) : (
+                      formatTruckDisplayLabel(
+                        TRUCK_CARRIER_TO_DISPLAY[truck.carrier] ?? truck.carrier,
+                        truck.label,
+                        truck.departureMs
+                      )
+                    )}
+                  </span>
+                  {editingId === truck.id ? (
+                    <span className="inline-flex items-center gap-1">
+                      <input
+                        type="datetime-local"
+                        defaultValue={msToDatetimeLocal(truck.departureMs)}
+                        onBlur={(e) => handleDepartureChange(truck.id, e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleDepartureChange(truck.id, (e.target as HTMLInputElement).value);
+                            setEditingId(null);
+                          }
+                          if (e.key === 'Escape') setEditingId(null);
+                        }}
+                        className="rounded border border-slate-300 dark:border-slate-500 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 px-1 py-0.5"
+                        aria-label="Departure time"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setEditingId(null)}
+                        className="text-xs font-medium px-2 py-1 rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-100"
+                      >
+                        Done
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      aria-label={`Mark ${truck.label} as present`}
+                      onClick={() => {
+                        setEditingId(null);
+                        markPresent(truck.id);
+                      }}
+                      className="inline-flex items-center justify-center w-5 h-5 rounded border border-emerald-500 dark:border-emerald-400 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 text-xs font-bold"
+                      title="Cancel departed"
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
               ))}
             </div>

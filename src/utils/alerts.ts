@@ -26,6 +26,10 @@ export interface AlertsInput {
   rows: ReportRow[];
   shipMethodKey: string;
   stepKey: string;
+  /**
+   * Trucks confirmed as "departed" by the user.
+   * (We use this instead of `departureMs <= now`.)
+   */
   trucks: TruckScheduleItem[];
   carrierStats: CarrierStats[];
   /** Previous period burn rate per carrier for drop detection. */
@@ -84,7 +88,8 @@ export function computeAlerts(input: AlertsInput): AlertItem[] {
   }
 
   // Truck departed with orders still in packing for that carrier
-  const hasDepartedTruck = trucks.some((t) => !t.cancelled && t.departureMs <= nowMs);
+  // (We only consider trucks confirmed as "departed" by the user.)
+  const hasDepartedTruck = trucks.some((t) => !t.cancelled);
   if (hasDepartedTruck && packingCarriers.size > 0) {
     for (const carrier of packingCarriers) {
       const hasOrders = carrierStats.some(

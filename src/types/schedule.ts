@@ -24,6 +24,18 @@ export interface CarrierStats {
   cutoffMs: number | null;
 }
 
+/** KPI thresholds per carrier for row color status in the Gantt view. */
+export interface CarrierKpiThresholds {
+  /** Warning threshold (yellow) for pallets with status != shipped. */
+  notShippedYellow: number;
+  /** Critical threshold (red) for pallets with status != shipped. */
+  notShippedRed: number;
+  /** Warning threshold (yellow) for pallets packed in the last hour. */
+  packedLastHourYellow: number;
+  /** Critical threshold (red) for pallets packed in the last hour. */
+  packedLastHourRed: number;
+}
+
 /** Alert kinds for the alert panel. */
 export type AlertKind =
   | 'burn_rate_drop'

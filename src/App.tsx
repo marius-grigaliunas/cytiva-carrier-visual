@@ -10,7 +10,7 @@ import { countParcelsForDelivery, countPalletsForDelivery, maxDispatchToPickingM
 import { getCarrierOrder, getCarrierFromShipMethod } from './utils/carriers.ts';
 import * as XLSX from 'xlsx';
 
-import type { TruckScheduleItem } from './types/schedule';
+import type { CarrierKpiThresholds, TruckScheduleItem } from './types/schedule';
 import { TruckScheduleStrip, type AddTruckData } from './components/TruckScheduleStrip';
 import { TRUCK_SCHEDULE, getDefaultCutoffsByCarrier } from './utils/truckSchedule';
 import { CarrierGrid } from './components/CarrierGrid';
@@ -20,12 +20,27 @@ import { LinesPerStep } from './components/LinesPerStep';
 import { DeliveriesSummary, type TableRow, type TableColumnKey } from './components/DeliveriesSummary';
 import { computeCarrierStats } from './utils/carrierStats';
 import { computeAlerts } from './utils/alerts';
+import { useTruckDepartureStore } from './stores/truckDepartureStore';
 
 import cytivaLogo from './assets/Cytiva.svg';
-import { ResizablePanel, clampRectToBounds, clampRectNoOverlap, type PanelRect } from './ResizablePanel';
+import { ResizablePanel } from './ResizablePanel';
+import { clampRectToBounds, clampRectNoOverlap, type PanelRect } from './utils/panelLayout';
 
 const base = (import.meta.env.BASE_URL ?? '/').replace(/\/?$/, '/')
 const DEFAULT_REPORT_URL = `${base}data/report.xlsx`
+
+function getDefaultKpiThresholdsByCarrier(): Record<string, CarrierKpiThresholds> {
+  const out: Record<string, CarrierKpiThresholds> = {};
+  for (const carrier of getCarrierOrder()) {
+    out[carrier] = {
+      notShippedYellow: 20,
+      notShippedRed: 10,
+      packedLastHourYellow: 2,
+      packedLastHourRed: 1,
+    };
+  }
+  return out;
+}
 
 function App() {
   const [loading, setLoading] = useState(false);
@@ -77,8 +92,20 @@ function App() {
   }, []);
 
   const [trucks, setTrucks] = useState<TruckScheduleItem[]>(getInitialTrucks);
+  const syncTrucksToDepartureStore = useTruckDepartureStore((s) => s.syncTrucks);
+  const statusById = useTruckDepartureStore((s) => s.statusById);
+
+  // Keep departure confirmation status in sync with the latest truck schedule.
+  // (Preserves existing status values; new trucks default to "present".)
+  useEffect(() => {
+    syncTrucksToDepartureStore(trucks);
+  }, [trucks, syncTrucksToDepartureStore]);
+
   const defaultCutoffs = useMemo(getDefaultCutoffsByCarrier, []);
   const [cutoffsByCarrier, setCutoffsByCarrier] = useState<Record<string, number>>(() => ({ ...defaultCutoffs }));
+  const [kpiThresholdsByCarrier, setKpiThresholdsByCarrier] = useState<Record<string, CarrierKpiThresholds>>(
+    () => getDefaultKpiThresholdsByCarrier()
+  );
   const [tick, setTick] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setTick((k) => k + 1), 60 * 1000);
@@ -88,10 +115,12 @@ function App() {
   const getInitialPanelLayout = useCallback((): Record<string, PanelRect> => ({
     carrier: { x: 0, y: 0, w: 50, h: 28 },
     step: { x: 50, y: 0, w: 50, h: 28 },
-    truckSchedule: { x: 0, y: 28, w: 100, h: 14 },
-    carrierGrid: { x: 0, y: 42, w: 65, h: 28 },
-    alertPanel: { x: 65, y: 42, w: 35, h: 28 },
-    table: { x: 0, y: 70, w: 100, h: 30 },
+    // Default dashboard layout: carrier grid on the left (80%),
+    // truck schedule on the right (20%), both full height.
+    carrierGrid: { x: 0, y: 0, w: 80, h: 100 },
+    truckSchedule: { x: 80, y: 0, w: 20, h: 100 },
+    alertPanel: { x: 0, y: 0, w: 35, h: 28 },
+    table: { x: 0, y: 0, w: 100, h: 30 },
   }), []);
 
   type PanelType = 'carrier' | 'step' | 'table' | 'truckSchedule' | 'carrierGrid' | 'alertPanel';
@@ -111,7 +140,9 @@ function App() {
   useEffect(() => {
     try {
       localStorage.setItem('cytiva-carrier-dark', darkMode ? '1' : '0');
-    } catch {}
+    } catch {
+      // Non-fatal: localStorage might be blocked (private mode, etc).
+    }
   }, [darkMode]);
 
   useEffect(() => {
@@ -283,9 +314,25 @@ function App() {
   const maxStepDisplay = Math.max(1, ...stepBarsToShow.map((s) => s.count));
 
   const nowMs = Date.now();
+
+  const sortedTrucks = useMemo(
+    () => [...trucks].slice().sort((a, b) => a.departureMs - b.departureMs),
+    [trucks]
+  );
+
+  const trucksForCarrierGrid = useMemo(
+    () => sortedTrucks.filter((t) => statusById[t.id] !== 'departed'),
+    [sortedTrucks, statusById]
+  );
+
+  const confirmedDepartedTrucks = useMemo(
+    () => sortedTrucks.filter((t) => statusById[t.id] === 'departed'),
+    [sortedTrucks, statusById]
+  );
+
   const cutoffMs =
-    trucks.filter((t) => !t.cancelled).length > 0
-      ? Math.min(...trucks.filter((t) => !t.cancelled).map((t) => t.departureMs))
+    trucksForCarrierGrid.filter((t) => !t.cancelled).length > 0
+      ? Math.min(...trucksForCarrierGrid.filter((t) => !t.cancelled).map((t) => t.departureMs))
       : null;
 
   const carrierStats = useMemo(() => {
@@ -317,12 +364,12 @@ function App() {
       rows,
       shipMethodKey,
       stepKey,
-      trucks,
+      trucks: confirmedDepartedTrucks,
       carrierStats,
-    previousBurnRateByCarrier: previousBurnRateRef.current,
-    nowMs,
-  });
-  }, [rows, shipMethodKey, stepKey, trucks, carrierStats, nowMs, tick]);
+      previousBurnRateByCarrier: previousBurnRateRef.current,
+      nowMs,
+    });
+  }, [rows, shipMethodKey, stepKey, confirmedDepartedTrucks, carrierStats, nowMs, tick]);
 
   useEffect(() => {
     carrierStats.forEach((s) => {
@@ -334,22 +381,50 @@ function App() {
     setCutoffsByCarrier((prev) => ({ ...prev, [carrier]: ms }));
   }, []);
 
+  const handleKpiThresholdChange = useCallback(
+    (
+      carrier: string,
+      key: keyof CarrierKpiThresholds,
+      value: number
+    ) => {
+      const parsed = Number.isFinite(value) ? Math.max(0, value) : 0;
+      setKpiThresholdsByCarrier((prev) => {
+        const current = prev[carrier] ?? {
+          notShippedYellow: 20,
+          notShippedRed: 10,
+          packedLastHourYellow: 2,
+          packedLastHourRed: 1,
+        };
+        return {
+          ...prev,
+          [carrier]: {
+            ...current,
+            [key]: parsed,
+          },
+        };
+      });
+    },
+    []
+  );
+
   const handleAddTruck = useCallback((truck: AddTruckData) => {
     const [h, m] = truck.time.trim().split(':').map((s) => parseInt(s, 10) || 0);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const d = new Date(today);
     d.setHours(h, m, 0, 0);
-    setTrucks((prev) => [
-      ...prev,
-      {
-        id: `truck-${Date.now()}-${truck.carrier}`,
-        label: truck.name || 'Truck',
-        departureMs: d.getTime(),
-        carrier: truck.carrier,
-        cancelled: false,
-      },
-    ]);
+    setTrucks((prev) =>
+      [
+        ...prev,
+        {
+          id: `truck-${Date.now()}-${truck.carrier}`,
+          label: truck.name || 'Truck',
+          departureMs: d.getTime(),
+          carrier: truck.carrier,
+          cancelled: false,
+        },
+      ].sort((a, b) => a.departureMs - b.departureMs)
+    );
   }, []);
 
   const loadFromUrl = useCallback(async () => {
@@ -563,16 +638,6 @@ setPanelVisible({ carrier: true, step: false, table: false, truckSchedule: true,
     }
   }, [totalDeliveries, totalLines, deliveriesInTableCount]);
 
-  const addPanel = useCallback((type: PanelType) => {
-    const existingOfType = panelOrder.filter((i) => panelTypes[i] === type);
-    const newId = existingOfType.length === 0 ? type : `${type}-${existingOfType.length + 1}`;
-    const defaultRect: PanelRect = { x: 10, y: 10, w: 45, h: 45 };
-    setPanelOrder((prev) => [...prev, newId]);
-    setPanelLayout((prev) => ({ ...prev, [newId]: defaultRect }));
-    setPanelVisible((prev) => ({ ...prev, [newId]: true }));
-    setPanelTypes((prev) => ({ ...prev, [newId]: type }));
-  }, [panelOrder, panelTypes]);
-
   const visiblePanelIds = panelOrder.filter(
     (id) => panelVisible[id] !== false && (panelTypes[id] !== 'table' || deliveryIdKey)
   );
@@ -700,6 +765,106 @@ setPanelVisible({ carrier: true, step: false, table: false, truckSchedule: true,
               </div>
               {sidebarOpen && (
                 <div className="flex flex-col gap-1 p-2 overflow-auto">
+                  {/* KPI thresholds (per carrier) */}
+                  <div className="mb-2 pb-2 border-b border-slate-200 dark:border-slate-600">
+                    <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">
+                      KPI thresholds by carrier
+                    </div>
+                    <div className="text-[10px] text-slate-500 dark:text-slate-400 mb-1">
+                      Color turns green/yellow/red when KPI drops below thresholds.
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {getCarrierOrder().map((carrier) => {
+                        const t = kpiThresholdsByCarrier[carrier] ?? {
+                          notShippedYellow: 20,
+                          notShippedRed: 10,
+                          packedLastHourYellow: 2,
+                          packedLastHourRed: 1,
+                        };
+                        return (
+                          <div
+                            key={`kpi-${carrier}`}
+                            className="rounded border border-slate-200 dark:border-slate-600 bg-white/70 dark:bg-slate-700/40 p-1.5"
+                          >
+                            <div className="text-xs font-medium text-slate-700 dark:text-slate-200 mb-1 truncate">
+                              {carrier}
+                            </div>
+                            <div className="grid grid-cols-[1fr_auto_auto] items-center gap-1">
+                              <span className="text-[10px] text-slate-600 dark:text-slate-300">
+                                Not shipped
+                              </span>
+                              <input
+                                type="number"
+                                min={0}
+                                step={1}
+                                value={t.notShippedYellow}
+                                onChange={(e) =>
+                                  handleKpiThresholdChange(
+                                    carrier,
+                                    'notShippedYellow',
+                                    Number(e.target.value)
+                                  )
+                                }
+                                className="text-[10px] w-12 px-1 py-0.5 rounded border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
+                                title="Yellow threshold for pallets not shipped"
+                              />
+                              <input
+                                type="number"
+                                min={0}
+                                step={1}
+                                value={t.notShippedRed}
+                                onChange={(e) =>
+                                  handleKpiThresholdChange(
+                                    carrier,
+                                    'notShippedRed',
+                                    Number(e.target.value)
+                                  )
+                                }
+                                className="text-[10px] w-12 px-1 py-0.5 rounded border border-red-300 dark:border-red-700 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
+                                title="Red threshold for pallets not shipped"
+                              />
+                            </div>
+                            <div className="grid grid-cols-[1fr_auto_auto] items-center gap-1 mt-1">
+                              <span className="text-[10px] text-slate-600 dark:text-slate-300">
+                                Packed/hr
+                              </span>
+                              <input
+                                type="number"
+                                min={0}
+                                step={0.1}
+                                value={t.packedLastHourYellow}
+                                onChange={(e) =>
+                                  handleKpiThresholdChange(
+                                    carrier,
+                                    'packedLastHourYellow',
+                                    Number(e.target.value)
+                                  )
+                                }
+                                className="text-[10px] w-12 px-1 py-0.5 rounded border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
+                                title="Yellow threshold for packed last hour"
+                              />
+                              <input
+                                type="number"
+                                min={0}
+                                step={0.1}
+                                value={t.packedLastHourRed}
+                                onChange={(e) =>
+                                  handleKpiThresholdChange(
+                                    carrier,
+                                    'packedLastHourRed',
+                                    Number(e.target.value)
+                                  )
+                                }
+                                className="text-[10px] w-12 px-1 py-0.5 rounded border border-red-300 dark:border-red-700 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
+                                title="Red threshold for packed last hour"
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
                   {/* Default cutoff times (per carrier) */}
                   <div className="mb-2 pb-2 border-b border-slate-200 dark:border-slate-600">
                     <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">
@@ -828,8 +993,10 @@ setPanelVisible({ carrier: true, step: false, table: false, truckSchedule: true,
               {type === 'truckSchedule' && (
                 <div className="h-full min-h-0 overflow-auto flex flex-col">
                   <TruckScheduleStrip
-                    trucks={trucks}
-                    onTrucksChange={setTrucks}
+                    trucks={sortedTrucks}
+                    onTrucksChange={(next) =>
+                      setTrucks(next.slice().sort((a, b) => a.departureMs - b.departureMs))
+                    }
                     onAddTruck={handleAddTruck}
                     className="flex-1 min-h-0"
                   />
@@ -839,8 +1006,9 @@ setPanelVisible({ carrier: true, step: false, table: false, truckSchedule: true,
                 <div className="h-full min-h-0 overflow-auto">
                   <CarrierGrid
                     stats={carrierStats}
-                    trucks={trucks}
+                    trucks={trucksForCarrierGrid}
                     cutoffsByCarrier={cutoffsByCarrier}
+                    kpiThresholdsByCarrier={kpiThresholdsByCarrier}
                     className="h-full"
                   />
                 </div>
