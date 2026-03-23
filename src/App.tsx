@@ -653,14 +653,6 @@ setPanelVisible({ carrier: true, step: false, table: false, truckSchedule: true,
           Carrier dashboard
         </h1>
         <div className="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={loadFromUrl}
-            disabled={loading}
-            className="px-4 py-2 whitespace-nowrap bg-blue-600 dark:bg-blue-500 text-white rounded-lg font-medium hover:bg-blue-700 dark:hover:bg-blue-600 disabled:opacity-50 disabled:pointer-events-none"
-          >
-            {loading ? 'Loading…' : 'Load report from server'}
-          </button>
           <label className="px-4 py-2 whitespace-nowrap bg-slate-200 dark:bg-slate-600 text-slate-800 dark:text-slate-100 rounded-lg font-medium hover:bg-slate-300 dark:hover:bg-slate-500 cursor-pointer">
             <input
               type="file"

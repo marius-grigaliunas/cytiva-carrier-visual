@@ -55,7 +55,7 @@ interface CarrierGanttProps {
 
 const ROW_HEIGHT = 72;
 const LABEL_W = 150;
-const TIMELINE_HOURS_START = 0;
+const TIMELINE_HOURS_START = 6;
 const TIMELINE_HOURS_END = 24;
 const HOUR_WIDTH_PX = 100;
 const FOCUS_BEFORE_HOURS = 3;
@@ -338,6 +338,10 @@ export function CarrierGantt({
                   const cutoffMs = cutoffsByCarrier[carrier] ?? defaultCutoffs[carrier];
                   const color = carrierColorMap[carrier] ?? '#64748b';
                   const barEndX = cutoffMs != null ? xFromMs(cutoffMs) : 100;
+                const clampedBarEndX = Math.min(100, Math.max(0, barEndX));
+                const pastBoundaryX = now <= rangeStartMs ? 0 : now >= rangeEndMs ? 100 : nowX;
+                const washedWidth = Math.min(clampedBarEndX, pastBoundaryX);
+                const vibrantWidth = Math.max(0, clampedBarEndX - washedWidth);
                   const carrierTrucks = trucksByCarrier.get(carrier) ?? [];
 
                   return (
@@ -369,25 +373,22 @@ export function CarrierGantt({
                           return 0;
                         };
 
-                        const severity = Math.max(
-                          severityFromThreshold(
-                            palletsNotShipped,
-                            thresholds.notShippedYellow,
-                            thresholds.notShippedRed
-                          ),
-                          severityFromThreshold(
-                            packedLastHour,
-                            thresholds.packedLastHourYellow,
-                            thresholds.packedLastHourRed
-                          )
-                        );
-
-                        const kpiBoxClass =
-                          severity === 2
-                            ? 'border-red-200 bg-red-50/90 text-red-900 dark:border-red-900/50 dark:bg-red-900/35 dark:text-red-100'
-                            : severity === 1
-                              ? 'border-amber-200 bg-amber-50/90 text-amber-900 dark:border-amber-900/50 dark:bg-amber-900/35 dark:text-amber-100'
-                              : 'border-emerald-200 bg-emerald-50/90 text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-900/35 dark:text-emerald-100';
+                      const notShippedSeverity = severityFromThreshold(
+                        palletsNotShipped,
+                        thresholds.notShippedYellow,
+                        thresholds.notShippedRed
+                      );
+                      const packedLastHourSeverity = severityFromThreshold(
+                        packedLastHour,
+                        thresholds.packedLastHourYellow,
+                        thresholds.packedLastHourRed
+                      );
+                      const classFromSeverity = (severity: 0 | 1 | 2): string =>
+                        severity === 2
+                          ? 'border-red-300 bg-red-200 text-red-950 dark:border-red-500 dark:bg-red-700 dark:text-red-50'
+                          : severity === 1
+                            ? 'border-amber-300 bg-amber-200 text-amber-950 dark:border-amber-500 dark:bg-amber-700 dark:text-amber-50'
+                            : 'border-emerald-300 bg-emerald-200 text-emerald-950 dark:border-emerald-500 dark:bg-emerald-700 dark:text-emerald-50';
 
                         // Position this block left of the vertical "Now" line.
                         const rowBoxesStyle = nowInRange
@@ -404,14 +405,14 @@ export function CarrierGantt({
                           >
                             <div className="flex items-baseline justify-between gap-2 min-w-0">
                               <div
-                                className={`rounded border shadow-sm px-2 py-1 text-[11px] leading-tight tabular-nums whitespace-nowrap ${kpiBoxClass}`}
+                              className={`rounded border shadow-sm px-2 py-1 text-[11px] leading-tight tabular-nums whitespace-nowrap ${classFromSeverity(notShippedSeverity)}`}
                               >
                                 Pallets not shipped = {formatCompactNumber(palletsNotShipped)}
                               </div>
                             </div>
                             <div className="flex items-baseline justify-between gap-2 min-w-0">
                               <div
-                                className={`rounded border shadow-sm px-2 py-1 text-[11px] leading-tight tabular-nums whitespace-nowrap ${kpiBoxClass}`}
+                              className={`rounded border shadow-sm px-2 py-1 text-[11px] leading-tight tabular-nums whitespace-nowrap ${classFromSeverity(packedLastHourSeverity)}`}
                               >
                                 Packed last hour = {formatCompactNumber(packedLastHour)}
                               </div>
@@ -425,12 +426,22 @@ export function CarrierGantt({
                         className="absolute inset-y-2 left-0 right-0 rounded overflow-hidden"
                       >
                         <div
-                        className="h-full rounded"
+                          className="absolute left-0 top-0 h-full rounded"
                           style={{
-                            width: `${Math.min(100, Math.max(0, barEndX))}%`,
+                            width: `${washedWidth}%`,
                             backgroundColor: color,
-                          opacity: 0.7,
-                          filter: 'saturate(1.25)',
+                            opacity: 0.3,
+                            filter: 'saturate(0.75)',
+                          }}
+                        />
+                        <div
+                          className="absolute top-0 h-full rounded"
+                          style={{
+                            left: `${washedWidth}%`,
+                            width: `${vibrantWidth}%`,
+                            backgroundColor: color,
+                            opacity: 0.6,
+                            filter: 'saturate(1.25)',
                           }}
                         />
                       </div>
