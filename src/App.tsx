@@ -1,6 +1,5 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
-  loadReportFromUrl,
   deliveriesByCarrier,
   uniqueDeliveryCount,
   linesByStep,
@@ -26,8 +25,6 @@ import cytivaLogo from './assets/Cytiva.svg';
 import { ResizablePanel } from './ResizablePanel';
 import { clampRectToBounds, clampRectNoOverlap, type PanelRect } from './utils/panelLayout';
 
-const base = (import.meta.env.BASE_URL ?? '/').replace(/\/?$/, '/')
-const DEFAULT_REPORT_URL = `${base}data/report.xlsx`
 
 function getDefaultKpiThresholdsByCarrier(): Record<string, CarrierKpiThresholds> {
   const out: Record<string, CarrierKpiThresholds> = {};
@@ -42,10 +39,56 @@ function getDefaultKpiThresholdsByCarrier(): Record<string, CarrierKpiThresholds
   return out;
 }
 
+function formatReportTimestamp(value: unknown): string {
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  const fromExcelSerial = (serial: number): string => {
+    // Convert Excel serial without timezone conversion.
+    const wholeDays = Math.floor(serial);
+    const dayFraction = serial - wholeDays;
+    const totalSeconds = Math.round(dayFraction * 24 * 60 * 60);
+    const excelEpochUtc = Date.UTC(1899, 11, 30);
+    const dateUtc = new Date(excelEpochUtc + wholeDays * 24 * 60 * 60 * 1000);
+
+    const year = dateUtc.getUTCFullYear();
+    const month = dateUtc.getUTCMonth() + 1;
+    const day = dateUtc.getUTCDate();
+    const hour = Math.floor(totalSeconds / 3600) % 24;
+    const minute = Math.floor((totalSeconds % 3600) / 60);
+    const second = totalSeconds % 60;
+
+    return `${pad2(day)}/${pad2(month)}/${year}, ${pad2(hour)}:${pad2(minute)}:${pad2(second)}`;
+  };
+
+  if (value == null) return '';
+  const text = String(value).trim();
+  if (!text) return '';
+
+  // Excel serial value (e.g. 46104.88564814815) -> local datetime text.
+  const numericValue = Number(text);
+  if (Number.isFinite(numericValue)) {
+    return fromExcelSerial(numericValue);
+  }
+
+  // Use raw report value without time conversion; only reorder date to DD/MM/YYYY.
+  const match = text.match(
+    /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/
+  );
+  if (match) {
+    const [, year, month, day, hour, minute, second] = match;
+    if (hour != null && minute != null) {
+      const sec = second ?? '00';
+      return `${day}/${month}/${year}, ${hour}:${minute}:${sec}`;
+    }
+    return `${day}/${month}/${year}`;
+  }
+  return text;
+}
+
 function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<ReportRow[]>([]);
+  const [reportTimestampLocal, setReportTimestampLocal] = useState('');
   const [darkMode, setDarkMode] = useState(() => {
     try {
       const stored = localStorage.getItem('cytiva-carrier-dark');
@@ -62,6 +105,8 @@ function App() {
   const [outermostLpnKey, setOutermostLpnKey] = useState('');
   const [dispatchedTimestampKey, setDispatchedTimestampKey] = useState('');
   const [dropOffTimestampKey, setDropOffTimestampKey] = useState('');
+  const [packedTimestampLocalKey, setPackedTimestampLocalKey] = useState('');
+  const [reportTimestampLocalKey, setReportTimestampLocalKey] = useState('');
   const [filterByCarriers, setFilterByCarriers] = useState<string[]>([]);
   const [filterBySteps, setFilterBySteps] = useState<string[]>([]);
   const [pendingCarriers, setPendingCarriers] = useState<Set<string>>(new Set());
@@ -340,20 +385,22 @@ function App() {
     return computeCarrierStats({
       rows,
       shipMethodKey,
+      stepKey,
       containerTypeKey,
       outermostLpnKey,
-      dispatchedTimestampKey,
-      dropOffTimestampKey,
+      packedTimestampLocalKey,
+      reportTimestampLocalKey,
       cutoffMs,
       nowMs,
     });
   }, [
     rows,
     shipMethodKey,
+    stepKey,
     containerTypeKey,
     outermostLpnKey,
-    dispatchedTimestampKey,
-    dropOffTimestampKey,
+    packedTimestampLocalKey,
+    reportTimestampLocalKey,
     cutoffMs,
     nowMs,
     tick,
@@ -427,44 +474,6 @@ function App() {
     );
   }, []);
 
-  const loadFromUrl = useCallback(async () => {
-    setError(null);
-    setLoading(true);
-    setFilterByCarriers([]);
-    setFilterBySteps([]);
-    setPendingCarriers(new Set());
-    setPendingSteps(new Set());
-    try {
-      const { rows: data, shipMethodKey: key, deliveryIdKey: didKey, stepKey: sk, containerTypeKey: ctk, outermostLpnKey: olk, dispatchedTimestampKey: dtsKey, dropOffTimestampKey: dotsKey } =
-        await loadReportFromUrl(DEFAULT_REPORT_URL);
-      setRows(data);
-      setShipMethodKey(key);
-      setDeliveryIdKey(didKey);
-      setStepKey(sk);
-      setContainerTypeKey(ctk ?? '');
-      setOutermostLpnKey(olk ?? '');
-      setDispatchedTimestampKey(dtsKey ?? '');
-      setDropOffTimestampKey(dotsKey ?? '');
-      setPanelLayout(getInitialPanelLayout());
-      setPanelOrder(['carrier', 'step', 'table', 'truckSchedule', 'carrierGrid', 'alertPanel']);
-      setPanelVisible({ carrier: true, step: false, table: false, truckSchedule: true, carrierGrid: true, alertPanel: false });
-      setPanelTypes({ carrier: 'carrier', step: 'step', table: 'table', truckSchedule: 'truckSchedule', carrierGrid: 'carrierGrid', alertPanel: 'alertPanel' });
-      setTrucks(getInitialTrucks());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load report');
-      setRows([]);
-      setShipMethodKey('');
-      setDeliveryIdKey('');
-      setStepKey('');
-      setContainerTypeKey('');
-      setOutermostLpnKey('');
-      setDispatchedTimestampKey('');
-      setDropOffTimestampKey('');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   const loadFromFile = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -518,6 +527,14 @@ function App() {
             headers.find((h) => /dispatched\s*timestamp/i.test(String(h).toLowerCase().trim())) ?? '';
           const dropOffTimestampKey =
             headers.find((h) => /drop\s*off\s*timestamp/i.test(String(h).toLowerCase().trim())) ?? '';
+          const packedTimestampLocalKey =
+            headers.find((h) => /packed\s*timestamp\s*\(local\)/i.test(String(h).toLowerCase().trim())) ?? '';
+          const reportTimestampKey =
+            headers.find((h) => /report\s*timestamp\s*\(local\)/i.test(String(h).toLowerCase().trim())) ?? '';
+          const reportTimestampValue =
+            reportTimestampKey
+              ? data.find((row) => row[reportTimestampKey] != null && String(row[reportTimestampKey]).trim() !== '')?.[reportTimestampKey]
+              : undefined;
           setRows(data);
           setShipMethodKey(shipMethodKey);
           setDeliveryIdKey(deliveryIdKey);
@@ -526,6 +543,9 @@ function App() {
           setOutermostLpnKey(outermostLpnKey);
           setDispatchedTimestampKey(dispatchedTimestampKey);
           setDropOffTimestampKey(dropOffTimestampKey);
+          setPackedTimestampLocalKey(packedTimestampLocalKey);
+          setReportTimestampLocalKey(reportTimestampKey);
+          setReportTimestampLocal(formatReportTimestamp(reportTimestampValue));
           setPanelLayout(getInitialPanelLayout());
           setPanelOrder(['carrier', 'step', 'table', 'truckSchedule', 'carrierGrid', 'alertPanel']);
 setPanelVisible({ carrier: true, step: false, table: false, truckSchedule: true, carrierGrid: true, alertPanel: false });
@@ -541,6 +561,9 @@ setPanelVisible({ carrier: true, step: false, table: false, truckSchedule: true,
           setOutermostLpnKey('');
           setDispatchedTimestampKey('');
           setDropOffTimestampKey('');
+          setPackedTimestampLocalKey('');
+          setReportTimestampLocalKey('');
+          setReportTimestampLocal('');
         } finally {
           setLoading(false);
         }
@@ -664,7 +687,14 @@ setPanelVisible({ carrier: true, step: false, table: false, truckSchedule: true,
             Choose Excel file…
           </label>
         </div>
-        <div className="flex-1 min-w-0" />
+        <div className="flex-1 min-w-0 flex justify-center">
+        {reportTimestampLocal && (
+          <div className="shrink-0 rounded-lg border border-blue-200 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/30 px-4 py-1.5 text-center">
+            <div className="text-sm uppercase tracking-wide font-semibold text-blue-700 dark:text-blue-300">Report timestamp</div>
+            <div className="text-lg font-bold text-blue-900 dark:text-blue-100 leading-tight">{reportTimestampLocal}</div>
+          </div>
+        )}
+        </div>
         <h2 className="text-md font-semibold text-slate-700 dark:text-slate-300 shrink-0 text-right">
           Created by: <span className="font-bold">Marius Grigaliunas</span>
         </h2>

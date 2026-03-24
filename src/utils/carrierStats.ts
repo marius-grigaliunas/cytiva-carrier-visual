@@ -21,6 +21,7 @@ function parseTimestamp(value: string | number | undefined): number {
 function confirmedPalletsByCarrier(
   rows: ReportRow[],
   shipMethodKey: string,
+  stepKey: string,
   containerTypeKey: string,
   outermostLpnKey: string
 ): Record<string, number> {
@@ -29,6 +30,8 @@ function confirmedPalletsByCarrier(
     const carrier = getCarrierFromShipMethod(
       row[shipMethodKey] != null ? String(row[shipMethodKey]) : ''
     );
+    const step = stepKey && row[stepKey] != null ? String(row[stepKey]).trim().toLowerCase() : '';
+    if (step !== 'firm contents' && step !== 'ship confirm') continue;
     if (!isPalletContainerType(row[containerTypeKey])) continue;
     const lpn = row[outermostLpnKey];
     if (lpn == null || String(lpn).trim() === '') continue;
@@ -40,37 +43,40 @@ function confirmedPalletsByCarrier(
   return out;
 }
 
-/** Pallets per hour in the last 60 minutes (from dispatched timestamp), per carrier. */
-function burnRateLastHour(
+/** Distinct pallets packed in the last 60 minutes (relative to report timestamp), per carrier. */
+function packedPalletsLastHour(
   rows: ReportRow[],
   shipMethodKey: string,
+  stepKey: string,
   containerTypeKey: string,
   outermostLpnKey: string,
-  dispatchedTimestampKey: string,
-  dropOffTimestampKey: string,
-  nowMs: number
+  packedTimestampLocalKey: string,
+  reportTimestampLocalKey: string
 ): Record<string, number> {
-  const windowStart = nowMs - 60 * 60 * 1000;
+  if (!packedTimestampLocalKey || !reportTimestampLocalKey) return {};
+  const reportTimestampRaw = rows.find(
+    (row) =>
+      row[reportTimestampLocalKey] != null &&
+      String(row[reportTimestampLocalKey]).trim() !== ''
+  )?.[reportTimestampLocalKey];
+  const reportTimestampMs = parseTimestamp(reportTimestampRaw);
+  if (Number.isNaN(reportTimestampMs)) return {};
+
+  const windowStart = reportTimestampMs - 60 * 60 * 1000;
   const byCarrier: Record<string, Set<string>> = {};
   for (const row of rows) {
     const carrier = getCarrierFromShipMethod(
       row[shipMethodKey] != null ? String(row[shipMethodKey]) : ''
     );
+    const step = stepKey && row[stepKey] != null ? String(row[stepKey]).trim().toLowerCase() : '';
+    if (step !== 'firm contents' && step !== 'ship confirm') continue;
     if (!isPalletContainerType(row[containerTypeKey])) continue;
     const lpn = row[outermostLpnKey];
     if (lpn == null || String(lpn).trim() === '') continue;
-    if (!dispatchedTimestampKey) continue;
-    const dispatched = row[dispatchedTimestampKey];
-    if (dispatched == null || String(dispatched).trim() === '') continue;
-    const dispatchedMs = parseTimestamp(dispatched);
-    if (Number.isNaN(dispatchedMs) || dispatchedMs < windowStart || dispatchedMs > nowMs) continue;
-    if (dropOffTimestampKey) {
-      const dropOff = row[dropOffTimestampKey];
-      if (dropOff != null && String(dropOff).trim() !== '') {
-        const dropOffMs = parseTimestamp(dropOff);
-        if (Number.isFinite(dropOffMs)) continue;
-      }
-    }
+    const packedTimestamp = row[packedTimestampLocalKey];
+    if (packedTimestamp == null || String(packedTimestamp).trim() === '') continue;
+    const packedMs = parseTimestamp(packedTimestamp);
+    if (Number.isNaN(packedMs) || packedMs < windowStart || packedMs > reportTimestampMs) continue;
     if (!byCarrier[carrier]) byCarrier[carrier] = new Set();
     byCarrier[carrier].add(String(lpn).trim());
   }
@@ -90,10 +96,11 @@ function paceStatus(projected: number, target: number): PaceStatus {
 export interface CarrierStatsInput {
   rows: ReportRow[];
   shipMethodKey: string;
+  stepKey: string;
   containerTypeKey: string;
   outermostLpnKey: string;
-  dispatchedTimestampKey: string;
-  dropOffTimestampKey: string;
+  packedTimestampLocalKey: string;
+  reportTimestampLocalKey: string;
   cutoffMs: number | null;
   nowMs: number;
 }
@@ -102,10 +109,11 @@ export function computeCarrierStats(input: CarrierStatsInput): CarrierStats[] {
   const {
     rows,
     shipMethodKey,
+    stepKey,
     containerTypeKey,
     outermostLpnKey,
-    dispatchedTimestampKey,
-    dropOffTimestampKey,
+    packedTimestampLocalKey,
+    reportTimestampLocalKey,
     cutoffMs,
     nowMs,
   } = input;
@@ -113,17 +121,18 @@ export function computeCarrierStats(input: CarrierStatsInput): CarrierStats[] {
   const confirmed = confirmedPalletsByCarrier(
     rows,
     shipMethodKey,
+    stepKey,
     containerTypeKey,
     outermostLpnKey
   );
-  const burnRates = burnRateLastHour(
+  const burnRates = packedPalletsLastHour(
     rows,
     shipMethodKey,
+    stepKey,
     containerTypeKey,
     outermostLpnKey,
-    dispatchedTimestampKey,
-    dropOffTimestampKey,
-    nowMs
+    packedTimestampLocalKey,
+    reportTimestampLocalKey
   );
 
   const order = getCarrierOrder();
