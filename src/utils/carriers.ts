@@ -3,19 +3,19 @@
  * Order matters: longer prefixes (e.g. DHLFRT_) should be checked before DHL_.
  */
 export const CARRIER_PREFIXES = [
-  'DHLFRT_',
-  'DHL_',
-  'EXPEDITORS_',
-  'KN_AIR',
   'GEODIS_',
+  'KN_AIR',
+  'EXPEDITORS_',
+  'DHL_',
+  'DHLFRT_',
 ] as const;
 
 export const CARRIER_LABELS: Record<string, string> = {
-  DHLFRT: 'DHL Freight',
-  DHL: 'DHL',
-  EXPEDITORS: 'EXPEDITORS',
-  KN_AIR: 'KN Air',
   GEODIS: 'GEODIS',
+  KN_AIR: 'KN Air',
+  EXPEDITORS: 'EXPEDITORS',
+  DHL: 'DHL',
+  DHLFRT: 'DHL Freight',
 };
 
 /**

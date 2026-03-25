@@ -18,7 +18,7 @@ function normalizeCarrierKey(s: string): string {
 // NOTE: Keys are normalized with `normalizeCarrierKey`.
 const FIXED_CARRIER_COLORS: Record<string, string> = {
   GEODIS: '#008000', // green
-  KNAIR: '#0000FF', // blue
+  KNAIR: '#0047AB', // blue
   DHL: '#FFA500', // orange
   EXPEDITORS: '#000000', 
   DHLFREIGHT: '#808080', // light gray
@@ -272,6 +272,36 @@ export function CarrierGantt({
     <div
       className={`flex flex-col rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-hidden ${className}`}
     > {/* Gantt chart */}
+      {/* Legend (kept above the scrollable chart area) */}
+      <div className="flex flex-wrap items-center gap-4 px-3 py-2 border-b border-slate-200 dark:border-slate-700 text-[10px] text-slate-500 dark:text-slate-400">
+        <span className="text-slate-500 dark:text-slate-400">Carriers</span>
+        {carriers.map((carrier) => (
+          <span key={carrier} className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: carrierColorMap[carrier] }} />
+            {carrier}
+          </span>
+        ))}
+        <span className="flex items-center gap-1.5">
+          <span className="w-3 h-0.5 bg-red-500" />
+          Now
+        </span>
+        <span>Truck departure = black vertical line; labels = carrier + truck + time</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-4 px-3 py-2 border-b border-slate-200 dark:border-slate-700 text-[10px] text-slate-500 dark:text-slate-400">
+        <span className="text-slate-500 dark:text-slate-400">KPIs</span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-3 h-0.5 bg-green-500" />
+          On track
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-3 h-0.5 bg-amber-500" />
+          At risk
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-3 h-0.5 bg-red-500" />
+          Behind
+        </span>
+      </div>
       <div className="flex-1 min-h-0 overflow-auto p-2">
         <div className="min-w-[400px] flex gap-0">
           {/* Carrier labels column */}
@@ -407,14 +437,14 @@ export function CarrierGantt({
                               <div
                               className={`rounded border shadow-sm px-2 py-1 text-[11px] leading-tight tabular-nums whitespace-nowrap ${classFromSeverity(notShippedSeverity)}`}
                               >
-                                Pallets not shipped = {formatCompactNumber(palletsNotShipped)}
+                                Pallets to ship = {formatCompactNumber(palletsNotShipped)}
                               </div>
                             </div>
                             <div className="flex items-baseline justify-between gap-2 min-w-0">
                               <div
                               className={`rounded border shadow-sm px-2 py-1 text-[11px] leading-tight tabular-nums whitespace-nowrap ${classFromSeverity(packedLastHourSeverity)}`}
                               >
-                                Packed last hour = {formatCompactNumber(packedLastHour)}
+                                Packed pallets / hour = {formatCompactNumber(packedLastHour)}
                               </div>
                             </div>
                           </div>
@@ -440,8 +470,8 @@ export function CarrierGantt({
                             left: `${washedWidth}%`,
                             width: `${vibrantWidth}%`,
                             backgroundColor: color,
-                            opacity: 0.6,
-                            filter: 'saturate(1.25)',
+                            opacity: 0.5,
+                            filter: 'saturate(1)',
                           }}
                         />
                       </div>
@@ -492,22 +522,6 @@ export function CarrierGantt({
             </div>
           </div>
         </div>
-      </div>
-
-      {/* Legend */}
-      <div className="flex flex-wrap items-center gap-4 px-3 py-2 border-t border-slate-200 dark:border-slate-700 text-[10px] text-slate-500 dark:text-slate-400">
-        <span className="text-slate-500 dark:text-slate-400">Carriers</span>
-        {carriers.map((carrier) => (
-          <span key={carrier} className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: carrierColorMap[carrier] }} />
-            {carrier}
-          </span>
-        ))}
-        <span className="flex items-center gap-1.5">
-          <span className="w-3 h-0.5 bg-red-500" />
-          Now
-        </span>
-        <span>Truck departure = black vertical line; labels = carrier + truck + time</span>
       </div>
     </div>
   );

@@ -713,48 +713,7 @@ setPanelVisible({ carrier: true, step: false, table: false, truckSchedule: true,
         </button>
       </header>
       <main className="flex-1 min-h-0 flex flex-col p-2 md:p-3 w-full overflow-hidden">
-        <div className="mb-1 min-h-0 flex items-center gap-1.5 text-xs rounded bg-slate-100 dark:bg-slate-800 px-2 py-1 shrink-0">
-          {hasFilter ? (
-            <>
-              <span className="text-slate-600 dark:text-slate-300">Filter:</span>
-              {filterByCarriers.length > 0 && (
-                <span className="inline-flex items-center gap-0.5 rounded-full bg-blue-100 dark:bg-blue-900/50 px-1.5 py-0.5 text-blue-800 dark:text-blue-200">
-                  Carriers: {filterByCarriers.join(', ')}
-                  <button
-                    type="button"
-                    aria-label="Clear carrier filter"
-                    onClick={() => setFilterByCarriers([])}
-                    className="rounded-full hover:bg-blue-200 dark:hover:bg-blue-800 p-0.5"
-                  >
-                    ×
-                  </button>
-                </span>
-              )}
-              {filterBySteps.length > 0 && (
-                <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/50 px-1.5 py-0.5 text-emerald-800 dark:text-emerald-200">
-                  Steps: {filterBySteps.join(', ')}
-                  <button
-                    type="button"
-                    aria-label="Clear step filter"
-                    onClick={() => setFilterBySteps([])}
-                    className="rounded-full hover:bg-emerald-200 dark:hover:bg-emerald-800 p-0.5"
-                  >
-                    ×
-                  </button>
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={() => { setFilterByCarriers([]); setFilterBySteps([]); }}
-                className="text-slate-500 dark:text-slate-400 underline hover:text-slate-700 dark:hover:text-slate-200"
-              >
-                Clear all
-              </button>
-            </>
-          ) : (
-            <span className="text-slate-400 dark:text-slate-500">No filters applied</span>
-          )}
-        </div>
+        
 
         {error && (
           <div className="mb-2 p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded text-red-800 dark:text-red-200 text-xs shrink-0">
