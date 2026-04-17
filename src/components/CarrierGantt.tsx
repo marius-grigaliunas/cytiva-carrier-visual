@@ -4,6 +4,7 @@ import {
   trucksToDepartures,
   getDefaultCutoffsByCarrier,
   getCutoffsByCarrierFromTrucks,
+  type CarrierCutoffWindow,
   type TruckDeparture,
   type TruckScheduleItemInput,
 } from '../utils/truckSchedule';
@@ -46,8 +47,8 @@ interface CarrierGanttProps {
   stats: CarrierStats[];
   /** Editable truck schedule - drives markers and default cutoffs */
   trucks?: TruckScheduleItem[];
-  /** Cutoff times per carrier (from sidebar settings). When provided, controlled mode. */
-  cutoffsByCarrier?: Record<string, number>;
+  /** Dispatch windows per carrier (from sidebar settings). When provided, controlled mode. */
+  cutoffsByCarrier?: Record<string, CarrierCutoffWindow>;
   /** KPI thresholds per carrier for row KPI coloring. */
   kpiThresholdsByCarrier?: Record<string, CarrierKpiThresholds>;
   className?: string;
@@ -61,12 +62,22 @@ const HOUR_WIDTH_PX = 100;
 const FOCUS_BEFORE_HOURS = 3;
 const FOCUS_AFTER_HOURS = 10;
 const FOCUS_SNAP_INTERVAL_MS = 5 * 60 * 1000;
+const TRUCK_LABEL_LANE_COUNT = 3;
+const TRUCK_LABEL_CLEARANCE_PX = 8;
+const TRUCK_LABEL_STACK_TOP_PX = 4;
+const TRUCK_LABEL_STACK_GAP_PX = 17;
 
 function formatCompactNumber(n: number): string {
   if (!Number.isFinite(n)) return '—';
   const rounded = Math.round(n * 10) / 10;
   const asInt = Math.round(rounded);
   return Math.abs(rounded - asInt) < 1e-9 ? asInt.toLocaleString() : rounded.toLocaleString(undefined, { maximumFractionDigits: 1 });
+}
+
+function estimateTruckLabelWidthPx(t: TruckDeparture): number {
+  // Keep lane assignment deterministic without measuring DOM width.
+  const labelText = `${t.carrierDisplay} ${t.name} ${t.time}`;
+  return Math.max(96, labelText.length * 6 + 20);
 }
 
 export function CarrierGantt({
@@ -96,14 +107,30 @@ export function CarrierGantt({
         return c === true;
       };
       const fromTrucks = getCutoffsByCarrierFromTrucks(trucksProp, isCancelled);
-      return Object.keys(fromTrucks).length > 0 ? fromTrucks : defaultCutoffsFromSchedule;
+      if (Object.keys(fromTrucks).length > 0) {
+        const merged: Record<string, CarrierCutoffWindow> = { ...defaultCutoffsFromSchedule };
+        for (const [carrier, endMs] of Object.entries(fromTrucks)) {
+          const fallbackStartMs = today.getTime() + 6 * 60 * 60 * 1000;
+          merged[carrier] = {
+            startMs: merged[carrier]?.startMs ?? fallbackStartMs,
+            endMs,
+          };
+        }
+        return merged;
+      }
     }
     return defaultCutoffsFromSchedule;
-  }, [trucksProp, defaultCutoffsFromSchedule]);
-  const [localCutoffs, setLocalCutoffs] = useState<Record<string, number>>(() => {
-    const init: Record<string, number> = {};
+  }, [trucksProp, defaultCutoffsFromSchedule, today]);
+  const [localCutoffs, setLocalCutoffs] = useState<Record<string, CarrierCutoffWindow>>(() => {
+    const init: Record<string, CarrierCutoffWindow> = {};
     for (const s of stats) {
-      init[s.carrier] = s.cutoffMs ?? defaultCutoffs[s.carrier] ?? today.getTime() + 12 * 60 * 60 * 1000;
+      const fallbackStartMs = today.getTime() + 6 * 60 * 60 * 1000;
+      const fallbackEndMs = today.getTime() + 12 * 60 * 60 * 1000;
+      const defaultWindow = defaultCutoffs[s.carrier];
+      init[s.carrier] = {
+        startMs: defaultWindow?.startMs ?? fallbackStartMs,
+        endMs: s.cutoffMs ?? defaultWindow?.endMs ?? fallbackEndMs,
+      };
     }
     for (const [k, v] of Object.entries(defaultCutoffs)) {
       if (init[k] == null) init[k] = v;
@@ -123,7 +150,13 @@ export function CarrierGantt({
       const next = { ...prev };
       for (const s of stats) {
         if (next[s.carrier] == null) {
-          next[s.carrier] = s.cutoffMs ?? defaultCutoffs[s.carrier] ?? today.getTime() + 12 * 60 * 60 * 1000;
+          const fallbackStartMs = today.getTime() + 6 * 60 * 60 * 1000;
+          const fallbackEndMs = today.getTime() + 12 * 60 * 60 * 1000;
+          const defaultWindow = defaultCutoffs[s.carrier];
+          next[s.carrier] = {
+            startMs: defaultWindow?.startMs ?? fallbackStartMs,
+            endMs: s.cutoffMs ?? defaultWindow?.endMs ?? fallbackEndMs,
+          };
           changed = true;
         }
       }
@@ -365,14 +398,62 @@ export function CarrierGantt({
                   </>
                 )}
                 {carriers.map((carrier) => {
-                  const cutoffMs = cutoffsByCarrier[carrier] ?? defaultCutoffs[carrier];
+                  const cutoffWindow = cutoffsByCarrier[carrier] ?? defaultCutoffs[carrier];
                   const color = carrierColorMap[carrier] ?? '#64748b';
-                  const barEndX = cutoffMs != null ? xFromMs(cutoffMs) : 100;
-                const clampedBarEndX = Math.min(100, Math.max(0, barEndX));
-                const pastBoundaryX = now <= rangeStartMs ? 0 : now >= rangeEndMs ? 100 : nowX;
-                const washedWidth = Math.min(clampedBarEndX, pastBoundaryX);
-                const vibrantWidth = Math.max(0, clampedBarEndX - washedWidth);
+                  const pastBoundaryX = now <= rangeStartMs ? 0 : now >= rangeEndMs ? 100 : nowX;
                   const carrierTrucks = trucksByCarrier.get(carrier) ?? [];
+                  const lastTruckMs = carrierTrucks.length > 0
+                    ? carrierTrucks[carrierTrucks.length - 1].departureMs
+                    : null;
+                  // Always render the carrier baseline from the timeline start (06:00).
+                  const lineStartMs = rangeStartMs;
+                  const lineEndMs = Math.max(
+                    cutoffWindow?.endMs ?? rangeStartMs,
+                    lastTruckMs ?? cutoffWindow?.endMs ?? rangeStartMs
+                  );
+                  const lineStartX = Math.min(100, Math.max(0, xFromMs(lineStartMs)));
+                  const lineEndX = Math.min(100, Math.max(lineStartX, xFromMs(lineEndMs)));
+                  const lineWidth = Math.max(0, lineEndX - lineStartX);
+                  const cutoffStartX = Math.min(
+                    lineEndX,
+                    Math.max(lineStartX, xFromMs(cutoffWindow?.startMs ?? lineStartMs))
+                  );
+                  const cutoffEndX = Math.min(
+                    lineEndX,
+                    Math.max(cutoffStartX, xFromMs(cutoffWindow?.endMs ?? lineEndMs))
+                  );
+                  const cutoffWidth = Math.max(0, cutoffEndX - cutoffStartX);
+                  const pastLineStartX = lineStartX;
+                  const pastLineEndX = Math.min(lineEndX, pastBoundaryX);
+                  const pastLineWidth = Math.max(0, pastLineEndX - pastLineStartX);
+                  const pastCutoffStartX = cutoffStartX;
+                  const pastCutoffEndX = Math.min(cutoffEndX, pastBoundaryX);
+                  const pastCutoffWidth = Math.max(0, pastCutoffEndX - pastCutoffStartX);
+                  const truckLabelLanes: number[] = (() => {
+                    if (carrierTrucks.length === 0) return [];
+                    const laneRightEdges = new Array(TRUCK_LABEL_LANE_COUNT).fill(-Infinity);
+                    return carrierTrucks.map((truck) => {
+                      const x = xFromMs(truck.departureMs);
+                      const xPx = (x / 100) * timelineWidthPx;
+                      const leftPx = xPx + 6; // Matches ml-1.5
+                      const rightPx = leftPx + estimateTruckLabelWidthPx(truck);
+                      let chosenLane = laneRightEdges.findIndex(
+                        (laneRightEdge) => leftPx >= laneRightEdge + TRUCK_LABEL_CLEARANCE_PX
+                      );
+                      if (chosenLane === -1) {
+                        chosenLane = laneRightEdges.reduce(
+                          (bestLane, laneRightEdge, laneIdx) =>
+                            laneRightEdge < laneRightEdges[bestLane] ? laneIdx : bestLane,
+                          0
+                        );
+                      }
+                      laneRightEdges[chosenLane] = Math.max(laneRightEdges[chosenLane], rightPx);
+                      return chosenLane;
+                    });
+                  })();
+                  const laneCountUsed = truckLabelLanes.length > 0
+                    ? Math.max(...truckLabelLanes) + 1
+                    : 1;
 
                   return (
                     <div
@@ -451,39 +532,66 @@ export function CarrierGantt({
                         );
                       })()}
 
-                      {/* Colored bar from start to cutoff */}
+                      {/* Carrier line + cutoff emphasis + past-time muting */}
                       <div
                         className="absolute inset-y-2 left-0 right-0 rounded overflow-hidden"
                       >
+                        {/* Base line from dispatch start to last truck */}
                         <div
                           className="absolute left-0 top-0 h-full rounded"
                           style={{
-                            width: `${washedWidth}%`,
+                            left: `${lineStartX}%`,
+                            width: `${lineWidth}%`,
                             backgroundColor: color,
-                            opacity: 0.3,
-                            filter: 'saturate(0.75)',
+                            opacity: 0.35,
+                            filter: 'saturate(0.7)',
                           }}
                         />
+                        {/* Cutoff window highlight (stronger saturation) */}
                         <div
                           className="absolute top-0 h-full rounded"
                           style={{
-                            left: `${washedWidth}%`,
-                            width: `${vibrantWidth}%`,
+                            left: `${cutoffStartX}%`,
+                            width: `${cutoffWidth}%`,
                             backgroundColor: color,
-                            opacity: 0.5,
-                            filter: 'saturate(1)',
+                            opacity: 0.72,
+                            filter: 'saturate(1.25)',
+                          }}
+                        />
+                        {/* Past-time mute overlay for line */}
+                        <div
+                          className="absolute top-0 h-full rounded"
+                          style={{
+                            left: `${pastLineStartX}%`,
+                            width: `${pastLineWidth}%`,
+                            backgroundColor: color,
+                            opacity: 0.3,
+                            filter: 'saturate(0.3)',
+                          }}
+                        />
+                        {/* Extra mute where highlighted cutoff is in the past */}
+                        <div
+                          className="absolute top-0 h-full rounded"
+                          style={{
+                            left: `${pastCutoffStartX}%`,
+                            width: `${pastCutoffWidth}%`,
+                            backgroundColor: color,
+                            opacity: 0.22,
+                            filter: 'saturate(0.25)',
                           }}
                         />
                       </div>
 
                       {/* Truck departure markers: exact vertical line + right-side truck label */}
-                      {carrierTrucks.map((t) => {
+                      {carrierTrucks.map((t, index) => {
                         const x = xFromMs(t.departureMs);
                         if (x < -2 || x > 102) return null;
                         const isPast = t.departureMs < now;
+                        const lane = truckLabelLanes[index] ?? 0;
+                        const isStacked = laneCountUsed > 1;
                         return (
                           <div
-                            key={`${t.carrier}-${t.time}-${t.name}`}
+                            key={`${t.carrier}-${t.time}-${t.name}-${index}`}
                             className="absolute inset-y-2 z-10 pointer-events-none"
                             style={{ left: `${x}%` }}
                             title={`${t.carrierDisplay} ${t.name} @ ${t.time}${isPast ? ' (departed)' : ''}`}
@@ -494,13 +602,17 @@ export function CarrierGantt({
                             </div>
                             <div
                               className={`
-                                absolute top-1/2 ml-1.5 -translate-y-1/2 flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] border shadow-sm whitespace-nowrap
+                                absolute ml-1.5 flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] border shadow-sm whitespace-nowrap
                                 ${isPast
                                   ? 'bg-slate-100 dark:bg-slate-700 border-slate-300 dark:border-slate-600 text-slate-400 dark:text-slate-500'
                                   : 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-600'
                                 }
                               `}
-                              style={!isPast ? { borderColor: color } : undefined}
+                              style={{
+                                top: isStacked ? `${TRUCK_LABEL_STACK_TOP_PX + lane * TRUCK_LABEL_STACK_GAP_PX}px` : '50%',
+                                transform: isStacked ? undefined : 'translateY(-50%)',
+                                ...(!isPast ? { borderColor: color } : undefined),
+                              }}
                             >
                               <span
                                 className={isPast ? 'text-slate-400 dark:text-slate-500' : 'font-semibold'}

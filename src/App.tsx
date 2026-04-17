@@ -11,7 +11,7 @@ import * as XLSX from 'xlsx';
 
 import type { CarrierKpiThresholds, TruckScheduleItem } from './types/schedule';
 import { TruckScheduleStrip, type AddTruckData } from './components/TruckScheduleStrip';
-import { TRUCK_SCHEDULE, getDefaultCutoffsByCarrier } from './utils/truckSchedule';
+import { TRUCK_SCHEDULE, getDefaultCutoffsByCarrier, type CarrierCutoffWindow } from './utils/truckSchedule';
 import { CarrierGrid } from './components/CarrierGrid';
 import { AlertPanel } from './components/AlertPanel';
 import { DeliveriesPerCarrier } from './components/DeliveriesPerCarrier';
@@ -147,7 +147,7 @@ function App() {
   }, [trucks, syncTrucksToDepartureStore]);
 
   const defaultCutoffs = useMemo(getDefaultCutoffsByCarrier, []);
-  const [cutoffsByCarrier, setCutoffsByCarrier] = useState<Record<string, number>>(() => ({ ...defaultCutoffs }));
+  const [cutoffsByCarrier, setCutoffsByCarrier] = useState<Record<string, CarrierCutoffWindow>>(() => ({ ...defaultCutoffs }));
   const [kpiThresholdsByCarrier, setKpiThresholdsByCarrier] = useState<Record<string, CarrierKpiThresholds>>(
     () => getDefaultKpiThresholdsByCarrier()
   );
@@ -240,7 +240,6 @@ function App() {
 
   const totalDeliveries = uniqueDeliveryCount(rowsForTotals, deliveryIdKey);
   const totalLines = rowsForTotals.length;
-  const hasFilter = filterByCarriers.length > 0 || filterBySteps.length > 0;
   const inCarrierSelectionMode = pendingCarriers.size > 0;
   const inStepSelectionMode = pendingSteps.size > 0;
 
@@ -424,9 +423,18 @@ function App() {
     });
   }, [carrierStats]);
 
-  const handleCutoffChange = useCallback((carrier: string, ms: number) => {
-    setCutoffsByCarrier((prev) => ({ ...prev, [carrier]: ms }));
-  }, []);
+  const handleCutoffChange = useCallback((carrier: string, key: keyof CarrierCutoffWindow, ms: number) => {
+    setCutoffsByCarrier((prev) => {
+      const current = prev[carrier] ?? defaultCutoffs[carrier];
+      return {
+        ...prev,
+        [carrier]: {
+          ...(current ?? { startMs: ms, endMs: ms }),
+          [key]: ms,
+        },
+      };
+    });
+  }, [defaultCutoffs]);
 
   const handleKpiThresholdChange = useCallback(
     (
@@ -493,7 +501,15 @@ function App() {
           const firstSheetName = workbook.SheetNames[0];
           const sheet = workbook.Sheets[firstSheetName];
           const data = XLSX.utils.sheet_to_json<ReportRow>(sheet, { defval: undefined });
-          const headers = data.length > 0 ? Object.keys(data[0] as object) : [];
+          // Read headers from the worksheet header row (not from first data row object).
+          // Using Object.keys(data[0]) can miss columns when first-row cells are empty.
+          const headerRows = XLSX.utils.sheet_to_json<(string | number | undefined)[]>(sheet, {
+            header: 1,
+            raw: false,
+          });
+          const headers = ((headerRows[0] ?? []) as (string | number | undefined)[])
+            .map((h) => (h == null ? '' : String(h).trim()))
+            .filter((h) => h !== '');
           const shipMethodKey =
             headers.find((h) =>
               /ship\s*method|carrier|ship\s*mode|shipping\s*method/i.test(h)
@@ -846,34 +862,56 @@ setPanelVisible({ carrier: true, step: false, table: false, truckSchedule: true,
                     </div>
                   </div>
 
-                  {/* Default cutoff times (per carrier) */}
+                  {/* Default dispatch window times (per carrier) */}
                   <div className="mb-2 pb-2 border-b border-slate-200 dark:border-slate-600">
                     <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">
-                      Default cutoff times
+                      Default dispatch windows
+                    </div>
+                    <div className="grid grid-cols-[1fr_auto_auto] items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400 px-0.5 mb-1">
+                      <span>Carrier</span>
+                      <span className="justify-self-center">Start</span>
+                      <span className="justify-self-center">End</span>
                     </div>
                     <div className="flex flex-col gap-1">
                       {getCarrierOrder().map((carrier) => {
-                        const ms = cutoffsByCarrier[carrier] ?? defaultCutoffs[carrier];
+                        const cutoff = cutoffsByCarrier[carrier] ?? defaultCutoffs[carrier];
                         const today = new Date();
                         today.setHours(0, 0, 0, 0);
-                        const timeStr = ms != null
-                          ? `${String(new Date(ms).getHours()).padStart(2, '0')}:${String(new Date(ms).getMinutes()).padStart(2, '0')}`
+                        const startTimeStr = cutoff?.startMs != null
+                          ? `${String(new Date(cutoff.startMs).getHours()).padStart(2, '0')}:${String(new Date(cutoff.startMs).getMinutes()).padStart(2, '0')}`
+                          : '';
+                        const endTimeStr = cutoff?.endMs != null
+                          ? `${String(new Date(cutoff.endMs).getHours()).padStart(2, '0')}:${String(new Date(cutoff.endMs).getMinutes()).padStart(2, '0')}`
                           : '';
                         return (
-                          <div key={carrier} className="flex items-center justify-between gap-1">
+                          <div key={carrier} className="grid grid-cols-[1fr_auto_auto] items-center gap-1">
                             <span className="text-xs text-slate-700 dark:text-slate-300 truncate min-w-0">
                               {carrier}
                             </span>
                             <input
                               type="time"
-                              value={timeStr}
+                              value={startTimeStr}
                               onChange={(e) => {
                                 const v = e.target.value;
                                 if (v) {
                                   const [h = 0, m = 0] = v.split(':').map((s) => parseInt(s, 10) || 0);
                                   const d = new Date(today);
                                   d.setHours(h, m, 0, 0);
-                                  handleCutoffChange(carrier, d.getTime());
+                                  handleCutoffChange(carrier, 'startMs', d.getTime());
+                                }
+                              }}
+                              className="text-xs w-20 px-1 py-0.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shrink-0"
+                            />
+                            <input
+                              type="time"
+                              value={endTimeStr}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                if (v) {
+                                  const [h = 0, m = 0] = v.split(':').map((s) => parseInt(s, 10) || 0);
+                                  const d = new Date(today);
+                                  d.setHours(h, m, 0, 0);
+                                  handleCutoffChange(carrier, 'endMs', d.getTime());
                                 }
                               }}
                               className="text-xs w-20 px-1 py-0.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shrink-0"

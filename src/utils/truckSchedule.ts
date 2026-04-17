@@ -32,6 +32,11 @@ export interface TruckDeparture {
   truckNumber: number;
 }
 
+export interface CarrierCutoffWindow {
+  startMs: number;
+  endMs: number;
+}
+
 /** Parse "HH:mm" or "H:mm" to ms since midnight, then add to today. */
 function parseTimeToTodayMs(timeStr: string): number {
   const [h, m] = timeStr.trim().split(':').map((s) => parseInt(s, 10) || 0);
@@ -59,15 +64,21 @@ export function getTruckDepartures(): TruckDeparture[] {
   });
 }
 
-/** Default cutoff (ms) per carrier = latest truck departure for that carrier. */
-export function getDefaultCutoffsByCarrier(): Record<string, number> {
-  const departures = getTruckDepartures();
-  const out: Record<string, number> = {};
-  for (const d of departures) {
-    const prev = out[d.carrierDisplay];
-    if (prev == null || d.departureMs > prev) out[d.carrierDisplay] = d.departureMs;
-  }
-  return out;
+function toTodayMs(hour: number, minute: number): number {
+  const d = new Date();
+  d.setHours(hour, minute, 0, 0);
+  return d.getTime();
+}
+
+/** Default dispatch windows (start/end) per carrier, based on agreed cutoffs. */
+export function getDefaultCutoffsByCarrier(): Record<string, CarrierCutoffWindow> {
+  return {
+    GEODIS: { startMs: toTodayMs(6, 0), endMs: toTodayMs(12, 0) },
+    'KN Air': { startMs: toTodayMs(12, 30), endMs: toTodayMs(15, 30) },
+    EXPEDITORS: { startMs: toTodayMs(10, 30), endMs: toTodayMs(19, 0) },
+    'DHL Freight': { startMs: toTodayMs(11, 30), endMs: toTodayMs(19, 0) },
+    DHL: { startMs: toTodayMs(6, 0), endMs: toTodayMs(16, 30) },
+  };
 }
 
 /** Editable truck item shape (name/label, time/departureMs, carrier). */
@@ -142,11 +153,11 @@ export const TRUCK_SCHEDULE = [{
     carrier: 'GEODIS',
 },{
     name: 'Truck 1',
-    time: '12:00',
+    time: '17:00',
     carrier: 'KN_AIR',
 },{
     name: 'Truck 2',
-    time: '19:00',
+    time: '17:30',
     carrier: 'KN_AIR',
 },{
     name: 'Truck 1',
